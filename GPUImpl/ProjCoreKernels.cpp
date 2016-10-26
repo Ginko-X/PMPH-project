@@ -248,15 +248,11 @@ void   run_OrigCPU(
 //         rollback(i, globs);
 //     }
 //--- use loop interchange and loop distribution
-std::vector<std::vector<REAL> > myRes; //[numT][outer]
-myRes.resize(globs.myTimeline.size()-1);
-for(int g = globs.myTimeline.size()-2;g>=0;--g)
-    myRes[g].resize(outer);
-
-//#pragma omp parallel for default(shared) schedule(static)
-for( unsigned k = 0; k < outer; ++ k ) {  //outermost loop k
-    for(int g = globs.myTimeline.size()-2;g>=0;--g) { // second outer loop, g
+#pragma omp parallel for default(shared) schedule(static)
+    for( unsigned k = 0; k < outer; ++ k ) {  //outermost loop k
        
+        for(int g = globs.myTimeline.size()-2;g>=0;--g) { // second outer loop, g
+
            //modified updateParams(g,alpha,beta,nu,globs);
             for(unsigned i=0;i<globs.myX.size();++i)
                 for(unsigned j=0;j<globs.myY.size();++j) {
@@ -270,16 +266,12 @@ for( unsigned k = 0; k < outer; ++ k ) {  //outermost loop k
                                     ); // nu*nu
                 }
 
-           // modified rollback 
- // for( unsigned   k = 0; k < outer; ++ k ) {  //outermost loop k
- //    for(int g = globs.myTimeline               
-	//        rollback(g, globs, k, myResult, myVarX, myVarY);   // rollback(i, globs);  
-    	   myRes[g][k] =  myResult[k][globs.myXindex][globs.myYindex];
+           // modified rollback                
+	       rollback(g, globs, k, myResult, myVarX, myVarY);   // rollback(i, globs);           
+    	   res[k] =  myResult[k][globs.myXindex][globs.myYindex];
         }
-    }
 
-for( unsigned   k = 0; k < outer; ++ k )  //outermost loop k
-    res[k] = myRes[0][k];
+    }
  } 
 
 //#endif // PROJ_CORE_ORIG
