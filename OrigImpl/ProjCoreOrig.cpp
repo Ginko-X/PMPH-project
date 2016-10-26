@@ -96,17 +96,17 @@ rollback( const unsigned g, PrivGlobs& globs, const unsigned k, vector<vector<ve
             u[j][i] = dtInv*myResult[k][i][j];
 
             if(i > 0) { 
-              u[j][i] += 0.5*( 0.5*myVarX[k][i][j]*globs.myDxx[i][0] ) 
+              u[j][i] += 0.5*( 0.5*myVarX[g][i][j]*globs.myDxx[i][0] ) 
                             * myResult[k][i-1][j];
             }
-            u[j][i]  +=  0.5*( 0.5*myVarX[k][i][j]*globs.myDxx[i][1] )
+            u[j][i]  +=  0.5*( 0.5*myVarX[g][i][j]*globs.myDxx[i][1] )
                             * myResult[k][i][j];
             if(i < numX-1) {
-              u[j][i] += 0.5*( 0.5*myVarX[k][i][j]*globs.myDxx[i][2] )
+              u[j][i] += 0.5*( 0.5*myVarX[g][i][j]*globs.myDxx[i][2] )
                             * myResult[k][i+1][j];
             }
         }
-    }
+   }
 
     //  explicit y
     for(j=0;j<numY;j++)
@@ -115,13 +115,13 @@ rollback( const unsigned g, PrivGlobs& globs, const unsigned k, vector<vector<ve
             v[i][j] = 0.0;
 
             if(j > 0) {
-              v[i][j] +=  ( 0.5*myVarY[k][i][j]*globs.myDyy[j][0] )
+              v[i][j] +=  ( 0.5*myVarY[g][i][j]*globs.myDyy[j][0] )
                          *  myResult[k][i][j-1];
             }
-            v[i][j]  +=   ( 0.5*myVarY[k][i][j]*globs.myDyy[j][1] )
+            v[i][j]  +=   ( 0.5*myVarY[g][i][j]*globs.myDyy[j][1] )
                          *  myResult[k][i][j];
             if(j < numY-1) {
-              v[i][j] +=  ( 0.5*myVarY[k][i][j]*globs.myDyy[j][2] )
+              v[i][j] +=  ( 0.5*myVarY[g][i][j]*globs.myDyy[j][2] )
                          *  myResult[k][i][j+1];
             }
             u[j][i] += v[i][j]; 
@@ -131,9 +131,9 @@ rollback( const unsigned g, PrivGlobs& globs, const unsigned k, vector<vector<ve
     //  implicit x
     for(j=0;j<numY;j++) {
         for(i=0;i<numX;i++) {  // here a, b,c should have size [numX]
-            a[i] =       - 0.5*(0.5*myVarX[k][i][j]*globs.myDxx[i][0]);
-            b[i] = dtInv - 0.5*(0.5*myVarX[k][i][j]*globs.myDxx[i][1]);
-            c[i] =       - 0.5*(0.5*myVarX[k][i][j]*globs.myDxx[i][2]);
+            a[i] =       - 0.5*(0.5*myVarX[g][i][j]*globs.myDxx[i][0]);
+            b[i] = dtInv - 0.5*(0.5*myVarX[g][i][j]*globs.myDxx[i][1]);
+            c[i] =       - 0.5*(0.5*myVarX[g][i][j]*globs.myDxx[i][2]);
         }
         // here yy should have size [numX]
         tridagPar(a,b,c,u[j],numX,u[j],yy);
@@ -142,9 +142,9 @@ rollback( const unsigned g, PrivGlobs& globs, const unsigned k, vector<vector<ve
     //  implicit y
     for(i=0;i<numX;i++) { 
         for(j=0;j<numY;j++) {  // here a, b, c should have size [numY]
-            a[j] =       - 0.5*(0.5*myVarY[k][i][j]*globs.myDyy[j][0]);
-            b[j] = dtInv - 0.5*(0.5*myVarY[k][i][j]*globs.myDyy[j][1]);
-            c[j] =       - 0.5*(0.5*myVarY[k][i][j]*globs.myDyy[j][2]);
+            a[j] =       - 0.5*(0.5*myVarY[g][i][j]*globs.myDyy[j][0]);
+            b[j] = dtInv - 0.5*(0.5*myVarY[g][i][j]*globs.myDyy[j][1]);
+            c[j] =       - 0.5*(0.5*myVarY[g][i][j]*globs.myDyy[j][2]);
         }
 
         for(j=0;j<numY;j++)
@@ -211,18 +211,27 @@ void   run_OrigCPU(
     // array expansion on myResult, myVar, myVarY
     // they are originally [numX][numY], make them [outer][numX][numY]
     vector<vector<vector<REAL> > > myResult, myVarX, myVarY; 
-    myResult.resize(outer); myVarX.resize(outer); myVarY.resize(outer);
+    myResult.resize(outer); 
+    myVarX.resize(globs.myTimeline.size()-1);
+    myVarY.resize(globs.myTimeline.size()-1);
+
 #pragma omp parallel for default(shared) schedule(static)    
     for(int i=0; i<outer; i++) {
         myResult[i].resize(numX);
+        for(int j=0; j<numX; j++){
+            myResult[i][j].resize(numY);
+	}
+    }
+
+    for(int i=0; i<globs.myTimeline.size()-1; i++){
         myVarX[i].resize(numX);
         myVarY[i].resize(numX);
         for(int j=0; j<numX; j++){
-            myResult[i][j].resize(numY);
             myVarX[i][j].resize(numY);
             myVarY[i][j].resize(numY);
 	}
     }
+
 
       
   // setPayoff(strike, globs);  it's parallel so can be loop-distributed on the outmost loop
@@ -253,30 +262,37 @@ myRes.resize(globs.myTimeline.size()-1);
 for(int g = globs.myTimeline.size()-2;g>=0;--g)
     myRes[g].resize(outer);
 
-//#pragma omp parallel for default(shared) schedule(static)
-for( unsigned k = 0; k < outer; ++ k ) {  //outermost loop k
+
+#pragma omp parallel for default(shared) schedule(static)
+// for( unsigned k = 0; k < outer; ++ k ) {  //outermost loop k
     for(int g = globs.myTimeline.size()-2;g>=0;--g) { // second outer loop, g
        
            //modified updateParams(g,alpha,beta,nu,globs);
             for(unsigned i=0;i<globs.myX.size();++i)
                 for(unsigned j=0;j<globs.myY.size();++j) {
-                    myVarX[k][i][j] = exp(2.0*(  beta*log(globs.myX[i])   
+                    myVarX[g][i][j] = exp(2.0*(  beta*log(globs.myX[i])   
                                           + globs.myY[j]             
                                           - 0.5*nu*nu*globs.myTimeline[g] )
                                     );
-                    myVarY[k][i][j] = exp(2.0*(  alpha*log(globs.myX[i])   
+                    myVarY[g][i][j] = exp(2.0*(  alpha*log(globs.myX[i])   
                                           + globs.myY[j]             
                                           - 0.5*nu*nu*globs.myTimeline[g] )
                                     ); // nu*nu
                 }
+	      }
+    //	    }
 
-           // modified rollback 
- // for( unsigned   k = 0; k < outer; ++ k ) {  //outermost loop k
- //    for(int g = globs.myTimeline               
-	//        rollback(g, globs, k, myResult, myVarX, myVarY);   // rollback(i, globs);  
+
+for(int g = globs.myTimeline.size()-2;g>=0;--g) { // second outer loop, Seq
+
+#pragma omp parallel for default(shared) schedule(static) 
+    for( unsigned k = 0; k < outer; ++ k ) {  //outermost loop k, after interchanged 
+
+           rollback(g, globs, k, myResult, myVarX, myVarY);   // rollback(i, globs);  
     	   myRes[g][k] =  myResult[k][globs.myXindex][globs.myYindex];
-        }
     }
+ }
+
 
 for( unsigned   k = 0; k < outer; ++ k )  //outermost loop k
     res[k] = myRes[0][k];
