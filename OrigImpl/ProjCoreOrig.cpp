@@ -2,8 +2,10 @@
 #include "Constants.h"
 #include "TridagPar.h"
 
+//Par
 void updateParams(const unsigned g, const REAL alpha, const REAL beta, const REAL nu, PrivGlobs& globs)
 {
+//#pragma omp parallel for default(shared) schedule(static)
     for(unsigned i=0;i<globs.myX.size();++i)
         for(unsigned j=0;j<globs.myY.size();++j) {
             globs.myVarX[i][j] = exp(2.0*(  beta*log(globs.myX[i])   
@@ -17,9 +19,12 @@ void updateParams(const unsigned g, const REAL alpha, const REAL beta, const REA
         }
 }
 
+
+//Par
 void setPayoff(const REAL strike, PrivGlobs& globs )
 {
-	for(unsigned i=0;i<globs.myX.size();++i)
+//#pragma omp parallel for default(shared) schedule(static)
+        for(unsigned i=0;i<globs.myX.size();++i)
 	{
 		REAL payoff = max(globs.myX[i]-strike, (REAL)0.0);
 		for(unsigned j=0;j<globs.myY.size();++j)
@@ -65,8 +70,12 @@ inline void tridag(
 }
 
 
+
+// modified rollback
 void
-rollback( const unsigned g, PrivGlobs& globs ) {
+rollback( const unsigned g, PrivGlobs& globs, const unsigned k, vector<vector<vector<REAL> > >& myResult, 
+    vector<vector<vector<REAL> > >& myVarX, vector<vector<vector<REAL> > >& myVarY ) {
+
     unsigned numX = globs.myX.size(),
              numY = globs.myY.size();
 
@@ -81,71 +90,73 @@ rollback( const unsigned g, PrivGlobs& globs ) {
     vector<REAL> a(numZ), b(numZ), c(numZ), y(numZ);     // [max(numX,numY)] 
     vector<REAL> yy(numZ);  // temporary used in tridag  // [max(numX,numY)]
 
-    //	explicit x
+    //  explicit x
     for(i=0;i<numX;i++) {
         for(j=0;j<numY;j++) {
-            u[j][i] = dtInv*globs.myResult[i][j];
+            u[j][i] = dtInv*myResult[k][i][j];
 
             if(i > 0) { 
-              u[j][i] += 0.5*( 0.5*globs.myVarX[i][j]*globs.myDxx[i][0] ) 
-                            * globs.myResult[i-1][j];
+              u[j][i] += 0.5*( 0.5*myVarX[k][i][j]*globs.myDxx[i][0] ) 
+                            * myResult[k][i-1][j];
             }
-            u[j][i]  +=  0.5*( 0.5*globs.myVarX[i][j]*globs.myDxx[i][1] )
-                            * globs.myResult[i][j];
+            u[j][i]  +=  0.5*( 0.5*myVarX[k][i][j]*globs.myDxx[i][1] )
+                            * myResult[k][i][j];
             if(i < numX-1) {
-              u[j][i] += 0.5*( 0.5*globs.myVarX[i][j]*globs.myDxx[i][2] )
-                            * globs.myResult[i+1][j];
+              u[j][i] += 0.5*( 0.5*myVarX[k][i][j]*globs.myDxx[i][2] )
+                            * myResult[k][i+1][j];
             }
         }
     }
 
-    //	explicit y
+    //  explicit y
     for(j=0;j<numY;j++)
     {
         for(i=0;i<numX;i++) {
             v[i][j] = 0.0;
 
             if(j > 0) {
-              v[i][j] +=  ( 0.5*globs.myVarY[i][j]*globs.myDyy[j][0] )
-                         *  globs.myResult[i][j-1];
+              v[i][j] +=  ( 0.5*myVarY[k][i][j]*globs.myDyy[j][0] )
+                         *  myResult[k][i][j-1];
             }
-            v[i][j]  +=   ( 0.5*globs.myVarY[i][j]*globs.myDyy[j][1] )
-                         *  globs.myResult[i][j];
+            v[i][j]  +=   ( 0.5*myVarY[k][i][j]*globs.myDyy[j][1] )
+                         *  myResult[k][i][j];
             if(j < numY-1) {
-              v[i][j] +=  ( 0.5*globs.myVarY[i][j]*globs.myDyy[j][2] )
-                         *  globs.myResult[i][j+1];
+              v[i][j] +=  ( 0.5*myVarY[k][i][j]*globs.myDyy[j][2] )
+                         *  myResult[k][i][j+1];
             }
             u[j][i] += v[i][j]; 
         }
     }
 
-    //	implicit x
+    //  implicit x
     for(j=0;j<numY;j++) {
         for(i=0;i<numX;i++) {  // here a, b,c should have size [numX]
-            a[i] =		 - 0.5*(0.5*globs.myVarX[i][j]*globs.myDxx[i][0]);
-            b[i] = dtInv - 0.5*(0.5*globs.myVarX[i][j]*globs.myDxx[i][1]);
-            c[i] =		 - 0.5*(0.5*globs.myVarX[i][j]*globs.myDxx[i][2]);
+            a[i] =       - 0.5*(0.5*myVarX[k][i][j]*globs.myDxx[i][0]);
+            b[i] = dtInv - 0.5*(0.5*myVarX[k][i][j]*globs.myDxx[i][1]);
+            c[i] =       - 0.5*(0.5*myVarX[k][i][j]*globs.myDxx[i][2]);
         }
         // here yy should have size [numX]
         tridagPar(a,b,c,u[j],numX,u[j],yy);
     }
 
-    //	implicit y
+    //  implicit y
     for(i=0;i<numX;i++) { 
         for(j=0;j<numY;j++) {  // here a, b, c should have size [numY]
-            a[j] =		 - 0.5*(0.5*globs.myVarY[i][j]*globs.myDyy[j][0]);
-            b[j] = dtInv - 0.5*(0.5*globs.myVarY[i][j]*globs.myDyy[j][1]);
-            c[j] =		 - 0.5*(0.5*globs.myVarY[i][j]*globs.myDyy[j][2]);
+            a[j] =       - 0.5*(0.5*myVarY[k][i][j]*globs.myDyy[j][0]);
+            b[j] = dtInv - 0.5*(0.5*myVarY[k][i][j]*globs.myDyy[j][1]);
+            c[j] =       - 0.5*(0.5*myVarY[k][i][j]*globs.myDyy[j][2]);
         }
 
         for(j=0;j<numY;j++)
             y[j] = dtInv*u[j][i] - 0.5*v[i][j];
 
         // here yy should have size [numY]
-        tridagPar(a,b,c,y,numY,globs.myResult[i],yy);
+        tridagPar(a,b,c,y,numY,myResult[k][i],yy);
     }
 }
 
+
+/*
 REAL   value(   PrivGlobs    globs,
                 const REAL s0,
                 const REAL strike, 
@@ -157,19 +168,25 @@ REAL   value(   PrivGlobs    globs,
                 const unsigned int numY,
                 const unsigned int numT
 ) {	
+    
     initGrid(s0,alpha,nu,t, numX, numY, numT, globs);
     initOperator(globs.myX,globs.myDxx);
     initOperator(globs.myY,globs.myDyy);
 
     setPayoff(strike, globs);
+
+
     for(int i = globs.myTimeline.size()-2;i>=0;--i)
     {
-        updateParams(i,alpha,beta,nu,globs);
-        rollback(i, globs);
+       updateParams(i,alpha,beta,nu,globs);
+       
+       rollback(i, globs);              
     }
-
+    
     return globs.myResult[globs.myXindex][globs.myYindex];
 }
+
+*/
 
 void   run_OrigCPU(  
                 const unsigned int&   outer,
@@ -183,15 +200,78 @@ void   run_OrigCPU(
                 const REAL&           beta,
                       REAL*           res   // [outer] RESULT
 ) {
-    REAL strike;
-    PrivGlobs    globs(numX, numY, numT);
 
-    for( unsigned i = 0; i < outer; ++ i ) {
-        strike = 0.001*i;
-        res[i] = value( globs, s0, strike, t,
-                        alpha, nu,    beta,
-                        numX,  numY,  numT );
+   PrivGlobs    globs(numX, numY, numT);
+ 
+    initGrid(s0,alpha,nu,t, numX, numY, numT, globs);
+    initOperator(globs.myX,globs.myDxx);
+    initOperator(globs.myY,globs.myDyy);
+
+
+    // array expansion on myResult, myVar, myVarY
+    // they are originally [numX][numY], make them [outer][numX][numY]
+    vector<vector<vector<REAL> > > myResult, myVarX, myVarY; 
+    myResult.resize(outer); myVarX.resize(outer); myVarY.resize(outer);
+#pragma omp parallel for default(shared) schedule(static)    
+    for(int i=0; i<outer; i++) {
+        myResult[i].resize(numX);
+        myVarX[i].resize(numX);
+        myVarY[i].resize(numX);
+        for(int j=0; j<numX; j++){
+            myResult[i][j].resize(numY);
+            myVarX[i][j].resize(numY);
+            myVarY[i][j].resize(numY);
+	}
     }
-}
+
+      
+  // setPayoff(strike, globs);  it's parallel so can be loop-distributed on the outmost loop
+  // also need to do array expansion on globs.myResult, i.e.  myResult
+#pragma omp parallel for default(shared) schedule(static)
+    for( unsigned k = 0; k < outer; ++ k ) {  // outmost loop
+        
+        // modified setPayoff function below
+        for(unsigned i=0;i<globs.myX.size();++i)
+        {
+            //REAL payoff = max(globs.myX[i]-strike, (REAL)0.0); // move this inside the loop to do privatization
+            for(unsigned j=0;j<globs.myY.size();++j) 
+                // globs.myResult[i][j] = payoff;   // note that payoff is just a scalar variables,
+                myResult[k][i][j] = max(globs.myX[i]-(0.001*k), (REAL)0.0); 
+        }
+    }
+        
+  
+//--- original code: 
+// for(int i = globs.myTimeline.size()-2;i>=0;--i)
+//     {
+//         updateParams(i,alpha,beta,nu,globs);
+//         rollback(i, globs);
+//     }
+//--- use loop interchange and loop distribution
+#pragma omp parallel for default(shared) schedule(static)
+    for( unsigned k = 0; k < outer; ++ k ) {  //outermost loop k
+       
+        for(int g = globs.myTimeline.size()-2;g>=0;--g) { // second outer loop, g
+
+           //modified updateParams(g,alpha,beta,nu,globs);
+            for(unsigned i=0;i<globs.myX.size();++i)
+                for(unsigned j=0;j<globs.myY.size();++j) {
+                    myVarX[k][i][j] = exp(2.0*(  beta*log(globs.myX[i])   
+                                          + globs.myY[j]             
+                                          - 0.5*nu*nu*globs.myTimeline[g] )
+                                    );
+                    myVarY[k][i][j] = exp(2.0*(  alpha*log(globs.myX[i])   
+                                          + globs.myY[j]             
+                                          - 0.5*nu*nu*globs.myTimeline[g] )
+                                    ); // nu*nu
+                }
+
+           // modified rollback                
+	       rollback(g, globs, k, myResult, myVarX, myVarY);   // rollback(i, globs);           
+    	   res[k] =  myResult[k][globs.myXindex][globs.myYindex];
+        }
+
+    }
+ } 
 
 //#endif // PROJ_CORE_ORIG
