@@ -32,6 +32,7 @@ void setPayoff(const REAL strike, PrivGlobs& globs )
 	}
 }
 
+// read a b c r, write u
 inline void tridag(
     const vector<REAL>&   a,   // size [n]
     const vector<REAL>&   b,   // size [n]
@@ -201,42 +202,82 @@ void   run_OrigCPU(
                       REAL*           res   // [outer] RESULT
 ) {
 
-   PrivGlobs    globs(numX, numY, numT);
+    PrivGlobs  globs(numX, numY, numT);
  
-    initGrid(s0,alpha,nu,t, numX, numY, numT, globs);
+    initGrid    (s0,alpha,nu,t, numX, numY, numT, globs);
     initOperator(globs.myX,globs.myDxx);
     initOperator(globs.myY,globs.myDyy);
 
 
-    // array expansion on myResult, myVar, myVarY
-    // they are originally [numX][numY], make them [outer][numX][numY]
-    vector<vector<vector<REAL> > > myResult, myVarX, myVarY; 
+    // array expansion on myResult (originally globs.myResult) from [numX][numY] to [outer][numX][numY]
+    vector<vector<vector<REAL> > > myResult;
     myResult.resize(outer); 
-    myVarX.resize(globs.myTimeline.size()-1);
-    myVarY.resize(globs.myTimeline.size()-1);
-
 #pragma omp parallel for default(shared) schedule(static)    
     for(int i=0; i<outer; i++) {
         myResult[i].resize(numX);
         for(int j=0; j<numX; j++){
             myResult[i][j].resize(numY);
-	}
+	   }
     }
 
-    for(int i=0; i<globs.myTimeline.size()-1; i++){
-        myVarX[i].resize(numX);
-        myVarY[i].resize(numX);
-        for(int j=0; j<numX; j++){
-            myVarX[i][j].resize(numY);
-            myVarY[i][j].resize(numY);
-	}
+    //myVarX myVarY: [numX][numY]
+    vector<vector<REAL> > myVarX, myVarY;     
+    myVarX.resize(numX);
+    myVarY.resize(numX);
+    for(int i=0; i<numX; i++){
+        myVarX[i].resize(numY);
+        myVarY[i].resize(numY);
     }
+
+
+unsigned numZ = max(numX, numY);
+
+
+// array expansion on a, b, c, y, yy, [outer][numZ][numZ]
+vector<vector<vector<REAL> > > a,b,c,y,yy;
+a.resize(outer);
+b.resize(outer);
+c.resize(outer);
+y.resize(outer);
+yy.resize(outer);
+
+#pragma omp parallel for default(shared) schedule(static)    
+for(int i=0; i<outer; i++) {
+    a[i].resize(numZ);
+    b[i].resize(numZ);
+    c[i].resize(numZ);
+    y[i].resize(numZ);
+    yy[i].resize(numZ);
+
+    for(int j=0; j<numZ; j++){
+       a[i][j].resize(numZ);
+       b[i][j].resize(numZ);
+       c[i][j].resize(numZ);
+       y[i][j].resize(numZ);
+       yy[i][j].resize(numZ);
+   }
+}
+ 
+// array expansion on u,v, u is [outer][numY][numX], v is [outer][numX][]
+vector<vector<vector<REAL> > > u,v;
+u.resize(outer);
+v.resize(outer);
+
+for(int k=0; k<outer; k++){
+    u[k].resize(numY);
+    for(int i=0; i< numY; i++)
+        u[k][i].resize(numX);
+
+    v[k].resize(numX);
+    for(int i=0; i< numX; i++)
+        v[k][i].resize(numY);
+}
 
 
       
   // setPayoff(strike, globs);  it's parallel so can be loop-distributed on the outmost loop
   // also need to do array expansion on globs.myResult, i.e.  myResult
-#pragma omp parallel for default(shared) schedule(static)
+#pragma omp parallel for default(shared) schedule(static)  //Kernel-1: 3D
     for( unsigned k = 0; k < outer; ++ k ) {  // outmost loop
         
         // modified setPayoff function below
@@ -257,45 +298,109 @@ void   run_OrigCPU(
 //         rollback(i, globs);
 //     }
 //--- use loop interchange and loop distribution
-std::vector<std::vector<REAL> > myRes; //[numT][outer]
-myRes.resize(globs.myTimeline.size()-1);
-for(int g = globs.myTimeline.size()-2;g>=0;--g)
-    myRes[g].resize(outer);
 
 
-#pragma omp parallel for default(shared) schedule(static)
-// for( unsigned k = 0; k < outer; ++ k ) {  //outermost loop k
+//modified updateParams(g,alpha,beta,nu,globs);
+  // Kernel-2: 3D
     for(int g = globs.myTimeline.size()-2;g>=0;--g) { // second outer loop, g
-       
-           //modified updateParams(g,alpha,beta,nu,globs);
-            for(unsigned i=0;i<globs.myX.size();++i)
-                for(unsigned j=0;j<globs.myY.size();++j) {
-                    myVarX[g][i][j] = exp(2.0*(  beta*log(globs.myX[i])   
-                                          + globs.myY[j]             
-                                          - 0.5*nu*nu*globs.myTimeline[g] )
-                                    );
-                    myVarY[g][i][j] = exp(2.0*(  alpha*log(globs.myX[i])   
-                                          + globs.myY[j]             
-                                          - 0.5*nu*nu*globs.myTimeline[g] )
-                                    ); // nu*nu
+
+        #pragma omp parallel for default(shared) schedule(static)  // Kernel-2: 2D
+        for(unsigned i=0;i<globs.myX.size();++i){
+            for(unsigned j=0;j<globs.myY.size();++j) {
+                myVarX[i][j] = exp(2.0*(  beta*log(globs.myX[i])   
+                                      + globs.myY[j]             
+                                      - 0.5*nu*nu*globs.myTimeline[g] )
+                                );
+                myVarY[i][j] = exp(2.0*(  alpha*log(globs.myX[i])   
+                                      + globs.myY[j]             
+                                      - 0.5*nu*nu*globs.myTimeline[g] )
+                               ); // nu*nu
+            }
+        }
+        
+        // rollback Part 1, write u,v, a, b, c  
+        #pragma omp parallel for default(shared) schedule(static)   // Kernel-3: 3D
+        for( unsigned k = 0; k < outer; ++ k ) {  //outermost loop k, after interchanged //Par        
+            for(unsigned j=0;j<numY;j++) {  // interchanged with the inner loop
+                for(unsigned i=0;i<numX;i++) {
+
+                    //  explicit x 
+                    u[k][j][i] =  (1.0/(globs.myTimeline[g+1]-globs.myTimeline[g])) *myResult[k][i][j];
+
+                    if(i > 0) { 
+                      u[k][j][i] += 0.5*( 0.5*myVarX[i][j]*globs.myDxx[i][0] ) 
+                                    * myResult[k][i-1][j];
+                    }
+                    u[k][j][i]  +=  0.5*( 0.5*myVarX[i][j]*globs.myDxx[i][1] )
+                                    * myResult[k][i][j];
+                    if(i < numX-1) {
+                      u[k][j][i] += 0.5*( 0.5*myVarX[i][j]*globs.myDxx[i][2] )
+                                    * myResult[k][i+1][j];
+                    }
+
+                    //  explicit y ; RAW v, write u
+                    v[k][i][j] = 0.0;
+
+                    if(j > 0) {
+                      v[k][i][j] +=  ( 0.5*myVarY[i][j]*globs.myDyy[j][0] )
+                                 *  myResult[k][i][j-1];
+                    }
+                    v[k][i][j]  +=   ( 0.5*myVarY[i][j]*globs.myDyy[j][1] )
+                                 *  myResult[k][i][j];
+                    if(j < numY-1) {
+                      v[k][i][j] +=  ( 0.5*myVarY[i][j]*globs.myDyy[j][2] )
+                                 *  myResult[k][i][j+1];
+                    }
+                    u[k][j][i] += v[k][i][j]; 
+
+                    
+                    //  implicit x  // write a,b,c
+                    a[k][j][i] =       - 0.5*(0.5*myVarX[i][j]*globs.myDxx[i][0]);
+                    b[k][j][i] = ( 1.0/(globs.myTimeline[g+1]-globs.myTimeline[g])) - 0.5*(0.5*myVarX[i][j]*globs.myDxx[i][1]);
+                    c[k][j][i] =       - 0.5*(0.5*myVarX[i][j]*globs.myDxx[i][2]);
                 }
-	      }
-    //	    }
+            }
+        }
+        
+        //Part 2 : read a,b,c,u to write u
+    #pragma omp parallel for default(shared) schedule(static)  //kernel-4: 2D Kernel or can be merged with the last one to make a 2D kernel
+        for( unsigned k = 0; k < outer; ++ k ) {  //outermost loop distribution //Par
+            for(unsigned j=0;j<numY;j++) {  // Par
+                tridagPar(a[k][j],b[k][j],c[k][j],u[k][j],numX,u[k][j],yy[k][j]);  
+            }
+        }
+
+        //Part 3, write a b c y reading from u,v    // implicit y, 
+    #pragma omp parallel for default(shared) schedule(static)  // Kernel-5: 3D
+        for( unsigned k = 0; k < outer; ++ k ) {  //outermost loop distribution //Par
+            for(unsigned i=0;i<numX;i++) { 
+                for(unsigned j=0;j<numY;j++) {  
+                    a[k][i][j] =       - 0.5*(0.5*myVarY[i][j]*globs.myDyy[j][0]);
+                    b[k][i][j] = ( 1.0/(globs.myTimeline[g+1]-globs.myTimeline[g])) - 0.5*(0.5*myVarY[i][j]*globs.myDyy[j][1]);
+                    c[k][i][j] =       - 0.5*(0.5*myVarY[i][j]*globs.myDyy[j][2]);
+               
+                    y[k][i][j] = ( 1.0/(globs.myTimeline[g+1]-globs.myTimeline[g])) *u[k][j][i] - 0.5*v[k][i][j];
+                }
+            }
+        }
+
+        //Part 4: write myResult reading from a b c y 
+    #pragma omp parallel for default(shared) schedule(static)   //kernel-6  
+        for( unsigned k = 0; k < outer; ++ k ) {  //outermost loop distribution //Par
+            for(unsigned i=0;i<numX;i++) { 
+                tridagPar(a[k][i],b[k][i],c[k][i],y[k][i],numY,myResult[k][i],yy[k][i]);
+            }
+        }
 
 
-for(int g = globs.myTimeline.size()-2;g>=0;--g) { // second outer loop, Seq
+	}
+
+
 
 #pragma omp parallel for default(shared) schedule(static) 
-    for( unsigned k = 0; k < outer; ++ k ) {  //outermost loop k, after interchanged 
+for( unsigned  k = 0; k < outer; ++ k )  //outermost loop k
+    res[k] = myResult[k][globs.myXindex][globs.myYindex]; // myRes[0][k];
 
-           rollback(g, globs, k, myResult, myVarX, myVarY);   // rollback(i, globs);  
-    	   myRes[g][k] =  myResult[k][globs.myXindex][globs.myYindex];
-    }
- }
-
-
-for( unsigned   k = 0; k < outer; ++ k )  //outermost loop k
-    res[k] = myRes[0][k];
- } 
+} 
 
 //#endif // PROJ_CORE_ORIG

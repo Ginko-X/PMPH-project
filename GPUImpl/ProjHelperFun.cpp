@@ -34,6 +34,8 @@ void initGrid(  const REAL s0, const REAL alpha, const REAL nu,const REAL t,
         globs.myY[i] = i*dy - globs.myYindex*dy + logAlpha;
 }
 
+
+
 /**
  * Fills in:
  *    Dx  [0..n-1][0..3] and 

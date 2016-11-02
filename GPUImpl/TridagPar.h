@@ -147,7 +147,7 @@ inline void tridagPar(
           vector<REAL>&   u,   // size [n]
           vector<REAL>&   uu   // size [n] temporary
 ) {
-    int i, offset;
+    // int i, offset;
 
     //vector<MyReal4> scanres(n); // supposed to also be in shared memory and to reuse the space of mats
     //--------------------------------------------------
