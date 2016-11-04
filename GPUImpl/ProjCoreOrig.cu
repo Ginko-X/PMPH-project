@@ -395,11 +395,7 @@ __global__ void sgmMatTranspose( REAL* A, REAL* trA, int rowsA, int colsA ){
  
     int tidx = threadIdx.x;
     int tidy = threadIdx.y;
-    // int j=blockIdx.x*T+tidx; 
-    // int i=blockIdx.y*T+tidy;
-    // int numX = colsA;
-    // int numY = rowsA;
-
+  
     unsigned int k = blockDim.z * blockIdx.z + threadIdx.z; //Outer
     unsigned int i = blockDim.y * blockIdx.y + threadIdx.y; //numX
     unsigned int j = blockDim.x * blockIdx.x + threadIdx.x; //numY
@@ -558,7 +554,7 @@ for(int g = numT-2;g>=0;--g) { // second outer loop, g
    // GPU rollback part 3
 
     sgmMatTranspose <<< grid_3D_OYX, block_3D>>>( d_u, d_u_tr, numY, numX );
-    // sgmMatTranspose <<< grid_3D_OXY, block_3D>>> (d_u_tr, d_u, numX, numY);
+    sgmMatTranspose <<< grid_3D_OXY, block_3D>>> (d_u_tr, d_u, numX, numY);
 
     d_implicit_y<<< grid_3D_OXY, block_3D >>>(d_u,d_v,d_a,d_b,d_c, d_yy,
         d_varY,d_timeline, d_dyy, g, numX, numY, outer, numZ);
