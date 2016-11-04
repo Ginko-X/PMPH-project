@@ -201,6 +201,58 @@ d_explicit_xy_implicit_x(REAL* u, REAL* v, REAL* a, REAL* b, REAL* c,
 }
 
 
+//interchange the two inner loop, also need transpose u, dyy, a ,b,c
+__global__ void
+d_explicit_xy_implicit_x_interchange(REAL* u_tr, REAL* v, REAL* a, REAL* b, REAL* c,  
+    REAL* varX, REAL* varY, REAL* timeline, REAL* dxx, REAL* dyy_tr, REAL* result, 
+    unsigned int g, unsigned numX, unsigned numY, unsigned outer, unsigned numZ){
+   
+    unsigned int k = blockDim.z * blockIdx.z + threadIdx.z; //Outer
+    unsigned int i = blockDim.y * blockIdx.y + threadIdx.y; //numX
+    unsigned int j = blockDim.x * blockIdx.x + threadIdx.x; //numY
+
+
+    if(k >= outer || j >= numY || i >= numX)
+    return;
+    
+    //  explicit x 
+    u_tr[XY(k,i,j)] =  (1.0/(timeline[g+1]-timeline[g])) *result[XY(k,i,j)];
+
+    if(i > 0) {
+      u_tr[XY(k,i,j)] += 0.5*( 0.5*varX[XY(0,i,j)]*dxx[D4ID(i,0)] ) 
+            * result[XY(k,i-1,j)];
+    }
+    u_tr[XY(k,i,j)]  +=  0.5*( 0.5*varX[XY(0,i,j)]*dxx[D4ID(i,1)] )
+            * result[XY(k,i,j)];
+    if(i < numX-1) {
+      u_tr[XY(k,i,j)]  +=  0.5*( 0.5*varX[XY(0,i,j)]*dxx[D4ID(i,2)] )
+            * result[XY(k,i+1,j)];
+    }
+
+    //  explicit y ; RAW v, write u
+    v[XY(k,i,j)] = 0.0;
+
+    if(j > 0) {
+      v[XY(k,i,j)] +=  ( 0.5*varY[XY(0,i,j)]*dyy_tr[Y4(0,j)] )
+         *  result[XY(k,i,j-1)];
+    }
+      v[XY(k,i,j)] +=  ( 0.5*varY[XY(0,i,j)]*dyy_tr[Y4(1,j)] )
+         *  result[XY(k,i,j)];
+    if(j < numY-1) {
+      v[XY(k,i,j)] +=  ( 0.5*varY[XY(0,i,j)]*dyy_tr[Y4(2,j)] )
+         *  result[XY(k,i,j+1)];
+    }
+    u_tr[XY(k,i,j)] += v[XY(k,i,j)];
+
+
+    //  implicit x  // write a,b,c
+    a[ZZ(k,j,i)] =       - 0.5*(0.5*varX[XY(0,i,j)]*dxx[D4ID(i,0)]);
+    b[ZZ(k,j,i)] = ( 1.0/(timeline[g+1]-timeline[g])) - 0.5*(0.5*varX[XY(0,i,j)]*dxx[D4ID(i,1)]);
+    c[ZZ(k,j,i)] =       - 0.5*(0.5*varX[XY(0,i,j)]*dxx[D4ID(i,2)]);
+    
+}
+
+
 
 #define UI(k,j,i) ((k)*(middle)*(n)+(j)*(n)+(i))  
 
@@ -575,8 +627,15 @@ void   run_OrigCPU(
 // for transpose 
     REAL * d_u_tr;
     REAL * d_dyy_tr;
+    REAL * d_a_tr;
+    REAL * d_b_tr;
+    REAL * d_c_tr;
     cudaMalloc((void**)&d_u_tr , memsize_OXY); //d_u : [outer][numY][numX]
     cudaMalloc((void**)&d_dyy_tr, memsize_Y *4);
+    cudaMalloc((void**)&d_a_tr, memsize_OZZ);
+    cudaMalloc((void**)&d_b_tr, memsize_OZZ);
+    cudaMalloc((void**)&d_c_tr, memsize_OZZ);
+
 
 
 //GPU init 
@@ -610,9 +669,28 @@ for(int g = numT-2;g>=0;--g) { // second outer loop, g
     d_updateParams_interchange<<< grid_2D_XY, block_2D >>>(d_varX, d_varY, d_x, d_y, d_timeline,g, 
          alpha, beta, nu, numX, numY);
     
-     // GPU rollback Part_1 
-    d_explicit_xy_implicit_x<<<grid_3D_OYX, block_3D>>>(d_u,d_v,d_a,d_b,d_c,
-        d_varX,d_varY,d_timeline,d_dxx,d_dyy,d_result, g, numX, numY, outer, numZ);
+//---- GPU rollback Part_1 
+    // transpose d_dyy
+    dim3 grid_2D_4Y(1, ceil((float)numY/T));
+    matTranspose2D<<< grid_2D_4Y, block_2D >>>(d_dyy, d_dyy_tr, numY, 4);
+
+    // dim3 grid_2D_Y4(ceil((float)numY/T),1);
+    // matTranspose2D<<< grid_2D_Y4, block_2D >>>(d_dyy_tr, d_dyy, 4, numY);
+
+    // d_explicit_xy_implicit_x<<<grid_3D_OYX, block_3D>>>(d_u,d_v,d_a,d_b,d_c,
+    //     d_varX,d_varY,d_timeline,d_dxx,d_dyy,d_result, g, numX, numY, outer, numZ);
+
+    d_explicit_xy_implicit_x_interchange<<<grid_3D_OXY, block_3D>>>(d_u_tr,d_v,d_a,d_b,d_c,
+        d_varX,d_varY,d_timeline,d_dxx,d_dyy_tr,d_result, g, numX, numY, outer, numZ);
+
+    dim3 grid_3D_OZZ(ceil(numZ/32.0), ceil(numZ/32.0),ceil(outer/1.0) );
+
+    sgmMatTranspose <<< grid_3D_OXY, block_3D>>>( d_u_tr, d_u, numX, numY );
+
+    // sgmMatTranspose <<< grid_3D_OZZ, block_3D>>>( d_a_tr, d_a, numZ, numZ );
+    // sgmMatTranspose <<< grid_3D_OZZ, block_3D>>>( d_b_tr, d_b, numZ, numZ );
+    // sgmMatTranspose <<< grid_3D_OZZ, block_3D>>>( d_c_tr, d_c, numZ, numZ );
+
 
 
    // GPU rollback part-2  
@@ -620,12 +698,19 @@ for(int g = numT-2;g>=0;--g) { // second outer loop, g
 
 
    // GPU rollback part 3
-    dim3 grid_2D_Y4(1, ceil((float)numY/T));
-    matTranspose2D<<< grid_2D_Y4, block_2D >>>(d_dyy, d_dyy_tr, numY, 4);
+    
+
+    // dim3 grid_2D_4Y(1, ceil((float)numY/T));
+    // matTranspose2D<<< grid_2D_4Y, block_2D >>>(d_dyy, d_dyy_tr, numY, 4);
+
+
+
     sgmMatTranspose <<< grid_3D_OYX, block_3D>>>( d_u, d_u_tr, numY, numX );
 
     d_implicit_y_trans<<< grid_3D_OXY, block_3D >>>(d_u_tr,d_v,d_a,d_b,d_c, d_yy,
         d_varY,d_timeline, d_dyy_tr, g, numX, numY, outer, numZ);
+
+
 
 
 //----------/GPU rollback 4 
