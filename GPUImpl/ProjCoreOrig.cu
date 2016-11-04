@@ -14,6 +14,8 @@
 #define XY(k,j,i) ((k)*(numY)*(numX)+(j)*(numY)+(i)) //[-][numX][numY]
 #define ZZ(k,j,i) (k*(numZ)*(numZ)+(j)*(numZ)+(i))    //[-][numZ][numZ]
 #define D4ID(j,i) ((j)*4+(i))
+#define X4(j,i) ((j)*numX+(i))
+#define Y4(j,i) ((j)*numY+(i))
 
 
 //{{{KERNELS  ------ 
@@ -338,7 +340,7 @@ d_implicit_y(REAL* u, REAL* v, REAL* a, REAL* b, REAL* c,  REAL* y,
 
 __global__ void
 d_implicit_y_trans(REAL* u_tr, REAL* v, REAL* a, REAL* b, REAL* c,  REAL* y,  
-    REAL* varY, REAL* timeline, REAL* dyy, 
+    REAL* varY, REAL* timeline, REAL* dyy_tr, 
     unsigned int g, unsigned numX, unsigned numY, unsigned outer, unsigned numZ){
    
     unsigned int k = blockDim.z * blockIdx.z + threadIdx.z; //Outer
@@ -349,9 +351,9 @@ d_implicit_y_trans(REAL* u_tr, REAL* v, REAL* a, REAL* b, REAL* c,  REAL* y,
     if(k >= outer || j >= numY || i >= numX)
         return;
 
-    a[ZZ(k,i,j)] =       - 0.5*(0.5*varY[XY(0,i,j)]*dyy[D4ID(j,0)]);
-    b[ZZ(k,i,j)] = ( 1.0/(timeline[g+1]-timeline[g])) - 0.5*(0.5*varY[XY(0,i,j)]*dyy[D4ID(j,1)]);
-    c[ZZ(k,i,j)] =       - 0.5*(0.5*varY[XY(0,i,j)]*dyy[D4ID(j,2)]);
+    a[ZZ(k,i,j)] =       - 0.5*(0.5*varY[XY(0,i,j)]*dyy_tr[Y4(0,j)]);
+    b[ZZ(k,i,j)] = ( 1.0/(timeline[g+1]-timeline[g])) - 0.5*(0.5*varY[XY(0,i,j)]*dyy_tr[Y4(1,j)]);
+    c[ZZ(k,i,j)] =       - 0.5*(0.5*varY[XY(0,i,j)]*dyy_tr[Y4(2,j)]);
     y[ZZ(k,i,j)] = ( 1.0/(timeline[g+1]-timeline[g])) * u_tr[XY(k,i,j)] - 0.5*v[XY(k,i,j)];
 }
 
@@ -359,8 +361,8 @@ d_implicit_y_trans(REAL* u_tr, REAL* v, REAL* a, REAL* b, REAL* c,  REAL* y,
 
 __global__ void
 sh_implicit_y(REAL* u_tr, REAL* v, REAL* a, REAL* b, REAL* c,  REAL* y,  
-    REAL* varY, REAL* timeline, REAL* dyy, 
-    unsigned int g, unsigned numX, unsigned numY, unsigned outer, unsigned numZ){
+    REAL* varY, REAL* timeline, REAL* dyy_tr, 
+    int g, unsigned numX, unsigned numY, unsigned outer, unsigned numZ){
    
     unsigned int k = blockDim.z * blockIdx.z + threadIdx.z; //Outer
     unsigned int i = blockDim.y * blockIdx.y + threadIdx.y; //numX
@@ -371,10 +373,10 @@ sh_implicit_y(REAL* u_tr, REAL* v, REAL* a, REAL* b, REAL* c,  REAL* y,
 
     __shared__ REAL 
         sh_varY[T][T+1],  
-        // sh_dyy[T][T+1];
+        // sh_dyy_tr[Y4+;,j
         sh_u[T][T+1],    
-        sh_v[T][T+1];
-        // sh_a[T][T+1]; //
+        sh_v[T][T+1],
+        sh_a[T][T+1], sh_y[T][T+1]; //
 
     int tidy = threadIdx.y;
     int tidx = threadIdx.x;
@@ -386,25 +388,27 @@ sh_implicit_y(REAL* u_tr, REAL* v, REAL* a, REAL* b, REAL* c,  REAL* y,
 
     // copy data from global memory to shared memory
     sh_u[tidy][tidx] = u_tr[XY(k,i,j)];
-    // sh_a[tidy][tidx] = a[i*numY + j];
+    sh_a[tidy][tidx] = a[ZZ(k,i,j)];
     sh_v[tidy][tidx] = v[XY(k,i,j)] ;
     sh_varY[tidy][tidx] = varY[i*numY +j];
-    // sh_dyy[tidx][tidy] = (i<4) ? dyy[D4ID(j,i)]) : 0.0; // need transpose
+    sh_y[tidy][tidx] = y[ZZ(k,i,j)];
+    // sh_dyy_tr[Y4]i,jdy] = (i<4) ? dyy_tr[Y4(i,j)]) : 0.0; // need transpose
 
     __syncthreads();
 
-    // a[ZZ(k,i,j)] =       - 0.5*(0.5*varY[XY(0,i,j)]*dyy[D4ID(j,0)]);
-    // b[ZZ(k,i,j)] = ( 1.0/(timeline[g+1]-timeline[g])) - 0.5*(0.5*varY[XY(0,i,j)]*dyy[D4ID(j,1)]);
-    // c[ZZ(k,i,j)] =       - 0.5*(0.5*varY[XY(0,i,j)]*dyy[D4ID(j,2)]);
+    // a[ZZ(k,i,j)] =       - 0.5*(0.5*varY[XY(0,i,j)]*dyy_tr[Y4(0,j)]);
+    // b[ZZ(k,i,j)] = ( 1.0/(timeline[g+1]-timeline[g])) - 0.5*(0.5*varY[XY(0,i,j)]*dyy_tr[Y4(1,j)]);
+    // c[ZZ(k,i,j)] =       - 0.5*(0.5*varY[XY(0,i,j)]*dyy_tr[Y4(2,j)]);
     // y[ZZ(k,i,j)] = ( 1.0/(timeline[g+1]-timeline[g])) * u[YX(k,j,i)] - 0.5*v[XY(k,i,j)];
-    a[ZZ(k,i,j)] = - 0.5*(0.5* sh_varY[tidy][tidx] * dyy[D4ID(j,0)]);
+    sh_a[tidy][tidx] = - 0.5*(0.5* sh_varY[tidy][tidx] * dyy_tr[Y4(0,j)]);
 
-    b[ZZ(k,i,j)] = ( 1.0/(timeline[g+1]-timeline[g])) - 0.5*(0.5*sh_varY[tidy][tidx]*dyy[D4ID(j,1)]);
+    b[ZZ(k,i,j)] = ( 1.0/(timeline[g+1]-timeline[g])) - 0.5*(0.5*sh_varY[tidy][tidx]*dyy_tr[Y4(1,j)]);
 
-    c[ZZ(k,i,j)] =       - 0.5*(0.5*sh_varY[tidy][tidx]*dyy[D4ID(j,2)]);
-    y[ZZ(k,i,j)] = ( 1.0/(timeline[g+1]-timeline[g])) * sh_u[tidy][tidx]- 0.5*sh_v[tidy][tidx];
+    c[ZZ(k,i,j)] =       - 0.5*(0.5*sh_varY[tidy][tidx]*dyy_tr[Y4(2,j)]);
+    sh_y[tidy][tidx] = ( 1.0/(timeline[g+1]-timeline[g])) * sh_u[tidy][tidx]- 0.5*sh_v[tidy][tidx];
 
-    // a[ZZ(k,i,j)] = sh_a[tidy][tidx];
+    a[ZZ(k,i,j)] = sh_a[tidy][tidx];
+    y[ZZ(k,i,j)] = sh_y[tidy][tidx];
 }
 
 
@@ -434,6 +438,29 @@ __global__ void sgmMatTranspose( REAL* A, REAL* trA, int rowsA, int colsA ){
         trA[j*rowsA+i] = tile[tidx][tidy];
         // trA[XY(k,j,i)] = tile[tidx][tidy];
 }
+
+
+
+// 2D matrix transpose
+__global__ void matTranspose2D(REAL* A, REAL* trA, int rowsA, int colsA){
+    __shared__ REAL tile[T][T+1];
+
+    int tidx = threadIdx.x;
+    int tidy = threadIdx.y;
+    int j = blockIdx.x*T + tidx;
+    int i = blockIdx.y*T + tidy;
+    
+    if( j < colsA && i < rowsA )
+        tile[tidy][tidx] = A[i*colsA+j];
+    __syncthreads();
+
+    i = blockIdx.y*T + threadIdx.x;
+    j = blockIdx.x*T + threadIdx.y;
+    
+    if( j < colsA && i < rowsA )
+        trA[j*rowsA+i] = tile[tidx][tidy];
+}
+
 
 
 //{{{ wrapper 
@@ -529,7 +556,9 @@ void   run_OrigCPU(
 
 // for transpose 
     REAL * d_u_tr;
+    REAL * d_dyy_tr;
     cudaMalloc((void**)&d_u_tr , memsize_OXY); //d_u : [outer][numY][numX]
+    cudaMalloc((void**)&d_dyy_tr, memsize_Y *4);
 
 
 //GPU init 
@@ -572,13 +601,13 @@ for(int g = numT-2;g>=0;--g) { // second outer loop, g
 
 
    // GPU rollback part 3
-
+    dim3 grid_2D_Y4(1, ceil((float)numY/T));
+    matTranspose2D<<< grid_2D_Y4, block_2D >>>(d_dyy, d_dyy_tr, numY, 4);
     sgmMatTranspose <<< grid_3D_OYX, block_3D>>>( d_u, d_u_tr, numY, numX );
     // sgmMatTranspose <<< grid_3D_OXY, block_3D>>> (d_u_tr, d_u, numX, numY);
 
     sh_implicit_y<<< grid_3D_OXY, block_3D >>>(d_u_tr,d_v,d_a,d_b,d_c, d_yy,
-        d_varY,d_timeline, d_dyy, g, numX, numY, outer, numZ);
-    // sgmMatTranspose<<< >>>( d_u, d_u_tr, int rowsA, int colsA )
+        d_varY,d_timeline, d_dyy_tr, g, numX, numY, outer, numZ);
 
 
 //----------/GPU rollback 4 
