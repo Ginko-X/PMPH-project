@@ -246,9 +246,9 @@ d_explicit_xy_implicit_x_interchange(REAL* u_tr, REAL* v, REAL* a, REAL* b, REAL
 
 
     //  implicit x  // write a,b,c
-    a[ZZ(k,j,i)] =       - 0.5*(0.5*varX[XY(0,i,j)]*dxx[D4ID(i,0)]);
-    b[ZZ(k,j,i)] = ( 1.0/(timeline[g+1]-timeline[g])) - 0.5*(0.5*varX[XY(0,i,j)]*dxx[D4ID(i,1)]);
-    c[ZZ(k,j,i)] =       - 0.5*(0.5*varX[XY(0,i,j)]*dxx[D4ID(i,2)]);
+    a[ZZ(k,i,j)] =       - 0.5*(0.5*varX[XY(0,i,j)]*dxx[D4ID(i,0)]);
+    b[ZZ(k,i,j)] = ( 1.0/(timeline[g+1]-timeline[g])) - 0.5*(0.5*varX[XY(0,i,j)]*dxx[D4ID(i,1)]);
+    c[ZZ(k,i,j)] =       - 0.5*(0.5*varX[XY(0,i,j)]*dxx[D4ID(i,2)]);
     
 }
 
@@ -680,16 +680,16 @@ for(int g = numT-2;g>=0;--g) { // second outer loop, g
     // d_explicit_xy_implicit_x<<<grid_3D_OYX, block_3D>>>(d_u,d_v,d_a,d_b,d_c,
     //     d_varX,d_varY,d_timeline,d_dxx,d_dyy,d_result, g, numX, numY, outer, numZ);
 
-    d_explicit_xy_implicit_x_interchange<<<grid_3D_OXY, block_3D>>>(d_u_tr,d_v,d_a,d_b,d_c,
+    d_explicit_xy_implicit_x_interchange<<<grid_3D_OXY, block_3D>>>(d_u_tr,d_v,d_a_tr,d_b_tr,d_c_tr,
         d_varX,d_varY,d_timeline,d_dxx,d_dyy_tr,d_result, g, numX, numY, outer, numZ);
 
     dim3 grid_3D_OZZ(ceil(numZ/32.0), ceil(numZ/32.0),ceil(outer/1.0) );
 
     sgmMatTranspose <<< grid_3D_OXY, block_3D>>>( d_u_tr, d_u, numX, numY );
 
-    // sgmMatTranspose <<< grid_3D_OZZ, block_3D>>>( d_a_tr, d_a, numZ, numZ );
-    // sgmMatTranspose <<< grid_3D_OZZ, block_3D>>>( d_b_tr, d_b, numZ, numZ );
-    // sgmMatTranspose <<< grid_3D_OZZ, block_3D>>>( d_c_tr, d_c, numZ, numZ );
+    sgmMatTranspose <<< grid_3D_OZZ, block_3D>>>( d_a_tr, d_a, numZ, numZ );
+    sgmMatTranspose <<< grid_3D_OZZ, block_3D>>>( d_b_tr, d_b, numZ, numZ );
+    sgmMatTranspose <<< grid_3D_OZZ, block_3D>>>( d_c_tr, d_c, numZ, numZ );
 
 
 
