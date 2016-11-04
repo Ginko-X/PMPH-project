@@ -100,6 +100,23 @@ d_updateParams(REAL* d_varX, REAL* d_varY, REAL* d_x, REAL* d_y,  REAL* d_timeli
 
 }
 
+
+__global__ void
+d_updateParams_interchange(REAL* d_varX, REAL* d_varY, REAL* d_x, REAL* d_y,  REAL* d_timeline,
+    int g, REAL alpha, REAL beta, REAL nu, 
+    unsigned int numX, unsigned int numY){
+
+    unsigned int i = blockDim.x*blockIdx.x + threadIdx.x;
+    unsigned int j = blockDim.y*blockIdx.y + threadIdx.y;
+
+    if(j >= numX || i >= numY)
+        return;
+
+    d_varX[j*numY+i] = exp(2.0*( beta*log(d_x[j]) +  d_y[i] - 0.5*nu*nu*d_timeline[g]));
+    d_varY[j*numY+i] = exp(2.0*( alpha*log(d_x[j]) + d_y[i] - 0.5*nu*nu*d_timeline[g]));
+
+}
+
 __global__ void
 d_updateParams_sh(REAL* d_varX, REAL* d_varY, REAL* d_x, REAL* d_y, REAL* d_timeline, 
     unsigned int g, REAL alpha, REAL beta, REAL nu, 
@@ -588,9 +605,10 @@ for(int g = numT-2;g>=0;--g) { // second outer loop, g
     // d_updateParams<<< grid_2D_YX, block_2D >>>(d_varX, d_varY, d_x, d_y, d_timeline,g, 
     //      alpha, beta, nu, numX, numY);
     dim3 block_2D(T,T), grid_2D_XY(ceil( numY / T ),ceil( numX / T )); // sh
-    d_updateParams_sh<<< grid_2D_XY, block_2D >>>(d_varX, d_varY, d_x, d_y, d_timeline,g, 
+    // d_updateParams_sh<<< grid_2D_XY, block_2D >>>(d_varX, d_varY, d_x, d_y, d_timeline,g, 
+    //      alpha, beta, nu, numX, numY);
+    d_updateParams_interchange<<< grid_2D_XY, block_2D >>>(d_varX, d_varY, d_x, d_y, d_timeline,g, 
          alpha, beta, nu, numX, numY);
-    
     
      // GPU rollback Part_1 
     d_explicit_xy_implicit_x<<<grid_3D_OYX, block_3D>>>(d_u,d_v,d_a,d_b,d_c,
