@@ -336,6 +336,26 @@ d_implicit_y(REAL* u, REAL* v, REAL* a, REAL* b, REAL* c,  REAL* y,
 }
 
 
+__global__ void
+d_implicit_y_trans(REAL* u_tr, REAL* v, REAL* a, REAL* b, REAL* c,  REAL* y,  
+    REAL* varY, REAL* timeline, REAL* dyy, 
+    unsigned int g, unsigned numX, unsigned numY, unsigned outer, unsigned numZ){
+   
+    unsigned int k = blockDim.z * blockIdx.z + threadIdx.z; //Outer
+    unsigned int i = blockDim.y * blockIdx.y + threadIdx.y; //numX
+    unsigned int j = blockDim.x * blockIdx.x + threadIdx.x; //numY
+
+
+    if(k >= outer || j >= numY || i >= numX)
+        return;
+
+    a[ZZ(k,i,j)] =       - 0.5*(0.5*varY[XY(0,i,j)]*dyy[D4ID(j,0)]);
+    b[ZZ(k,i,j)] = ( 1.0/(timeline[g+1]-timeline[g])) - 0.5*(0.5*varY[XY(0,i,j)]*dyy[D4ID(j,1)]);
+    c[ZZ(k,i,j)] =       - 0.5*(0.5*varY[XY(0,i,j)]*dyy[D4ID(j,2)]);
+    y[ZZ(k,i,j)] = ( 1.0/(timeline[g+1]-timeline[g])) * u_tr[XY(k,i,j)] - 0.5*v[XY(k,i,j)];
+}
+
+
 
 __global__ void
 sh_implicit_y(REAL* u, REAL* v, REAL* a, REAL* b, REAL* c,  REAL* y,  
@@ -554,9 +574,9 @@ for(int g = numT-2;g>=0;--g) { // second outer loop, g
    // GPU rollback part 3
 
     sgmMatTranspose <<< grid_3D_OYX, block_3D>>>( d_u, d_u_tr, numY, numX );
-    sgmMatTranspose <<< grid_3D_OXY, block_3D>>> (d_u_tr, d_u, numX, numY);
+    // sgmMatTranspose <<< grid_3D_OXY, block_3D>>> (d_u_tr, d_u, numX, numY);
 
-    d_implicit_y<<< grid_3D_OXY, block_3D >>>(d_u,d_v,d_a,d_b,d_c, d_yy,
+    d_implicit_y_trans<<< grid_3D_OXY, block_3D >>>(d_u_tr,d_v,d_a,d_b,d_c, d_yy,
         d_varY,d_timeline, d_dyy, g, numX, numY, outer, numZ);
     // sgmMatTranspose<<< >>>( d_u, d_u_tr, int rowsA, int colsA )
 
