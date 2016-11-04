@@ -390,27 +390,33 @@ sh_implicit_y(REAL* u, REAL* v, REAL* a, REAL* b, REAL* c,  REAL* y,
 
 
 
-__global__ void sgmMatTranspose( float* A, float* trA, int rowsA, int colsA ){
-    __shared__ float tile[T][T+1];
+__global__ void sgmMatTranspose( REAL* A, REAL* trA, int rowsA, int colsA ){
+    __shared__ REAL tile[T][T+1];
  
     int tidx = threadIdx.x;
     int tidy = threadIdx.y;
-    int j=blockIdx.x*T+tidx; 
-    int i=blockIdx.y*T+tidy;
-    int gidz=blockIdx.z*blockDim.z*threadIdx.z;
+    // int j=blockIdx.x*T+tidx; 
+    // int i=blockIdx.y*T+tidy;
+    // int numX = colsA;
+    // int numY = rowsA;
+
+    unsigned int k = blockDim.z * blockIdx.z + threadIdx.z; //Outer
+    unsigned int i = blockDim.y * blockIdx.y + threadIdx.y; //numX
+    unsigned int j = blockDim.x * blockIdx.x + threadIdx.x; //numY
     
-    A += gidz*rowsA*colsA; 
-    trA += gidz*rowsA*colsA;
+    A += k*rowsA*colsA; 
+    trA += k*rowsA*colsA;
     
     if( j < colsA && i < rowsA )
-        tile[tidy][tidx] = A[i*colsA+j];
+        tile[tidy][tidx] = A[i* colsA + j];
     __syncthreads();
     
-    i=blockIdx.y*T+tidx; 
-    j=blockIdx.x*T+tidy;
+    i=blockIdx.y*blockDim.y+tidx; 
+    j=blockIdx.x*blockDim.x+tidy;
     
     if( j < colsA && i < rowsA )
         trA[j*rowsA+i] = tile[tidx][tidy];
+        // trA[XY(k,j,i)] = tile[tidx][tidy];
 }
 
 
@@ -505,6 +511,10 @@ void   run_OrigCPU(
     cudaMalloc((void**)&d_u , memsize_OXY); //d_u : [outer][numY][numX]
     cudaMalloc((void**)&d_v , memsize_OXY); //d_v : [outer][numX][numY]
 
+// for transpose 
+    REAL * d_u_tr;
+    cudaMalloc((void**)&d_u_tr , memsize_OXY); //d_u : [outer][numY][numX]
+
 
 //GPU init 
     initGrid_GPU(s0, alpha, nu,t, numX,numY, numT, d_x, d_y, d_timeline, myXindex, myYindex);
@@ -513,15 +523,15 @@ void   run_OrigCPU(
 
 
  // GPU setPayoff
-    dim3 block_3D(16, 8, 8);
-    dim3 grid_3D_OXY(ceil(numY/16.0), ceil(numX/8.0), ceil(outer/8.0));
+    dim3 block_3D(32, 32, 1);
+    dim3 grid_3D_OXY(ceil(numY/32.0), ceil(numX/32.0), ceil(outer/1.0));
     d_setPayoff<<<grid_3D_OXY, block_3D>>>(d_result, d_x, numY, numX, outer);
    
     dim3 block_2D(T,T);
     dim3 grid_2D_OX(ceil(numX/T), ceil((float)outer/T));
     dim3 grid_2D_OY(ceil(numY/T), ceil((float)outer/T));
     dim3 grid_2D_YX(ceil( numX / T ), ceil( numY / T ));   
-    dim3 grid_3D_OYX(ceil(numX/16.0), ceil(numY/8.0),ceil(outer/8.0) );
+    dim3 grid_3D_OYX(ceil(numX/32.0), ceil(numY/32.0),ceil(outer/1.0) );
 
 
 // timeline loop
@@ -547,10 +557,12 @@ for(int g = numT-2;g>=0;--g) { // second outer loop, g
 
    // GPU rollback part 3
 
-    // sgmMatTranspose<<< >>>( d_u, d_tr_u, int rowsA, int colsA )
-    sh_implicit_y<<< grid_3D_OXY, block_3D >>>(d_u,d_v,d_a,d_b,d_c, d_yy,
+    sgmMatTranspose <<< grid_3D_OYX, block_3D>>>( d_u, d_u_tr, numY, numX );
+    // sgmMatTranspose <<< grid_3D_OXY, block_3D>>> (d_u_tr, d_u, numX, numY);
+
+    d_implicit_y<<< grid_3D_OXY, block_3D >>>(d_u,d_v,d_a,d_b,d_c, d_yy,
         d_varY,d_timeline, d_dyy, g, numX, numY, outer, numZ);
-    // sgmMatTranspose<<< >>>( d_u, d_tr_u, int rowsA, int colsA )
+    // sgmMatTranspose<<< >>>( d_u, d_u_tr, int rowsA, int colsA )
 
 
 //----------/GPU rollback 4 
