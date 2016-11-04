@@ -103,7 +103,7 @@ d_updateParams_sh(REAL* d_varX, REAL* d_varY, REAL* d_x, REAL* d_y, REAL* d_time
     unsigned int g, REAL alpha, REAL beta, REAL nu, 
     unsigned int numX, unsigned int numY){
 
-    // __shared__ REAL sh_varX[(int)T][(int)(T+1)], sh_varY[(int)T][(int)(T+1)]; //
+    __shared__ REAL sh_varX[T][T+1], sh_varY[T][T+1]; //
 
     __shared__ REAL sh_x[T], sh_y[T]; //
 
@@ -116,17 +116,17 @@ d_updateParams_sh(REAL* d_varX, REAL* d_varY, REAL* d_x, REAL* d_y, REAL* d_time
         return;
 
     // shared memory store operation
-    // sh_varX[tidy][tidx] = d_varX[j*numY+i];
-    // sh_varY[tidy][tidx] = d_varY[j*numY+i]; 
+    sh_varX[tidy][tidx] = d_varX[j*numY+i];
+    sh_varY[tidy][tidx] = d_varY[j*numY+i]; 
     sh_x[tidy] = d_x[j];
     sh_y[tidx] = d_y[i];
     __syncthreads();
 
-    d_varX[j*numY+i] = exp(2.0*( beta*log(sh_x[tidy]) +  sh_y[tidx] - 0.5*nu*nu*d_timeline[g]));
-    d_varY[j*numY+i] = exp(2.0*( alpha*log(sh_x[tidy]) + sh_y[tidx] - 0.5*nu*nu*d_timeline[g]));
+    sh_varX[tidy][tidx] = exp(2.0*( beta*log(sh_x[tidy]) +  sh_y[tidx] - 0.5*nu*nu*d_timeline[g]));
+    sh_varY[tidy][tidx] = exp(2.0*( alpha*log(sh_x[tidy]) + sh_y[tidx] - 0.5*nu*nu*d_timeline[g]));
 
-    // d_varX[j*numY+i] = sh_varX[tidy][tidx]; 
-    // d_varY[j*numY+i] = sh_varY[tidy][tidx]; 
+    d_varX[j*numY+i] = sh_varX[tidy][tidx]; 
+    d_varY[j*numY+i] = sh_varY[tidy][tidx]; 
 
 }
 
@@ -351,22 +351,22 @@ sh_implicit_y(REAL* u, REAL* v, REAL* a, REAL* b, REAL* c,  REAL* y,
 
     __shared__ REAL 
         sh_varY[T][T+1],  
-        sh_dyy[T][T+1]; 
-        // sh_u[T][T+1],    sh_v[T][T+1]; //
+        sh_dyy[T][T+1],
+        sh_u[T][T+1],    sh_v[T][T+1]; //
 
     int tidy = threadIdx.y;
     int tidx = threadIdx.x;
-    // int gidz = blockIdx.z*blockDim.z*threadIdx.z;
+    int gidz = blockIdx.z*blockDim.z*threadIdx.z;
 
     // read data offset
     // u+= gidz * numY * numX;
     // v+= gidz * numX * numY;
 
     // copy data from global memory to shared memory
-    // sh_u[tidy][tidx] = u[i*numY+j];
+    // sh_u[tidy][tidx] = u[i*numX+j];
     // sh_v[tidy][tidx] = v[j*numX + i];
     sh_varY[tidy][tidx] = varY[i*numY +j];
-    // sh_dyy[tidy][tidx] = dyy[i*4 + j];
+    sh_dyy[tidy][tidx] = (i<4) ? dyy[j*4 + i] : 0.0;
 
     __syncthreads();
 
@@ -378,12 +378,38 @@ sh_implicit_y(REAL* u, REAL* v, REAL* a, REAL* b, REAL* c,  REAL* y,
     // b[ZZ(k,i,j)] = ( 1.0/(timeline[g+1]-timeline[g])) - 0.5*(0.5*varY[XY(0,i,j)]*dyy[D4ID(j,1)]);
     // c[ZZ(k,i,j)] =       - 0.5*(0.5*varY[XY(0,i,j)]*dyy[D4ID(j,2)]);
     // y[ZZ(k,i,j)] = ( 1.0/(timeline[g+1]-timeline[g])) * u[YX(k,j,i)] - 0.5*v[XY(k,i,j)];
-    a[ZZ(k,i,j)] = - 0.5*(0.5* sh_varY[tidy][tidx] * dyy[D4ID(j,0)]);
+    a[ZZ(k,i,j)] = - 0.5*(0.5* sh_varY[tidy][tidx] * sh_dyy[tidx][0]);
 
-    b[ZZ(k,i,j)] = ( 1.0/(timeline[g+1]-timeline[g])) - 0.5*(0.5*sh_varY[tidy][tidx]*dyy[D4ID(j,1)]);
+    b[ZZ(k,i,j)] = ( 1.0/(timeline[g+1]-timeline[g])) - 0.5*(0.5*sh_varY[tidy][tidx]*sh_dyy[tidx][1]);
 
-    c[ZZ(k,i,j)] =       - 0.5*(0.5*sh_varY[tidy][tidx]*dyy[D4ID(j,2)]);
+    c[ZZ(k,i,j)] =       - 0.5*(0.5*sh_varY[tidy][tidx]*sh_dyy[tidx][2]);
     y[ZZ(k,i,j)] = ( 1.0/(timeline[g+1]-timeline[g])) * u[YX(k,j,i)] - 0.5*v[XY(k,i,j)];
+}
+
+
+
+
+__global__ void sgmMatTranspose( float* A, float* trA, int rowsA, int colsA ){
+    __shared__ float tile[T][T+1];
+ 
+    int tidx = threadIdx.x;
+    int tidy = threadIdx.y;
+    int j=blockIdx.x*T+tidx; 
+    int i=blockIdx.y*T+tidy;
+    int gidz=blockIdx.z*blockDim.z*threadIdx.z;
+    
+    A += gidz*rowsA*colsA; 
+    trA += gidz*rowsA*colsA;
+    
+    if( j < colsA && i < rowsA )
+        tile[tidy][tidx] = A[i*colsA+j];
+    __syncthreads();
+    
+    i=blockIdx.y*T+tidx; 
+    j=blockIdx.x*T+tidy;
+    
+    if( j < colsA && i < rowsA )
+        trA[j*rowsA+i] = tile[tidx][tidy];
 }
 
 
@@ -519,8 +545,11 @@ for(int g = numT-2;g>=0;--g) { // second outer loop, g
 
 
    // GPU rollback part 3
-    sh_implicit_y<<< grid_3D_OXY, block_3D >>>(d_u,d_v,d_a,d_b,d_c, d_yy,
+
+    // sgmMatTranspose<<< >>>( d_u, d_tr_u, int rowsA, int colsA )
+    d_implicit_y<<< grid_3D_OXY, block_3D >>>(d_u,d_v,d_a,d_b,d_c, d_yy,
         d_varY,d_timeline, d_dyy, g, numX, numY, outer, numZ);
+    // sgmMatTranspose<<< >>>( d_u, d_tr_u, int rowsA, int colsA )
 
 
 //----------/GPU rollback 4 
