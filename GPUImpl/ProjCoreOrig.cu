@@ -8,7 +8,7 @@
 //#include "ProjHost.cu"
 
 #define EPSILON 0.001
-#define T 32.0
+#define T 32
 
 #define YX(k,j,i) ((k)*(numY)*(numX)+(j)*(numX)+(i))  //[-][numY][numX]
 #define XY(k,j,i) ((k)*(numY)*(numX)+(j)*(numY)+(i)) //[-][numX][numY]
@@ -83,8 +83,8 @@ d_setPayoff(REAL* d_result, REAL* d_x, unsigned int x_size, unsigned int y_size,
 
 
 __global__ void
-d_updateParams(REAL* d_varX, REAL* d_varY, REAL* d_x, REAL* d_y, REAL* d_timeline, 
-    unsigned int g, REAL alpha, REAL beta, REAL nu, 
+d_updateParams(REAL* d_varX, REAL* d_varY, REAL* d_x, REAL* d_y,  REAL* d_timeline,
+    int g, REAL alpha, REAL beta, REAL nu, 
     unsigned int numX, unsigned int numY){
 
     unsigned int i = blockDim.x*blockIdx.x + threadIdx.x;
@@ -98,6 +98,40 @@ d_updateParams(REAL* d_varX, REAL* d_varY, REAL* d_x, REAL* d_y, REAL* d_timelin
 
 }
 
+/*
+__global__ void
+d_updateParams_sh(REAL* d_varX, REAL* d_varY, REAL* d_x, REAL* d_y, REAL* d_timeline, 
+    unsigned int g, REAL alpha, REAL beta, REAL nu, 
+    unsigned int numX, unsigned int numY){
+
+    // __shared__ REAL sh_varX[(int)T][(int)(T+1)], sh_varY[(int)T][(int)(T+1)]; //
+
+    __shared__ REAL sh_x[T], sh_y[T]; //
+
+    unsigned int i = blockDim.x*blockIdx.x + threadIdx.x;  //numY
+    unsigned int j = blockDim.y*blockIdx.y + threadIdx.y;  //numX
+    int tidy = threadIdx.y;
+    int tidx = threadIdx.x;
+
+    if(j >= numX || i >= numY)
+        return;
+
+    // shared memory store operation
+    sh_varX[tidy][tidx] = d_varX[j*numY+i];
+    sh_varY[tidy][tidx] = d_varY[j*numY+i]; 
+    sh_x[tidy][tidx] = d_x[j];
+    sh_y[tidy][tidx] = d_y[i];
+    sh_timeline[tidy][tidx] = d_timeline[g]; 
+    __syncthreads();
+
+    sh_varX[tidy][tidx] = exp(2.0*( beta*log(sh_x[tidy][tidx]) +  sh_y[tidy][tidx] - 0.5*nu*nu*sh_timeline[tidy][tidx]));
+    sh_varY[tidy][tidx] = exp(2.0*( alpha*log(sh_x[tidy][tidx]) + sh_y[tidy][tidx] - 0.5*nu*nu*sh_timeline[tidy][tidx]));
+
+    d_varX[j*numY+i] = sh_varX[tidy][tidx]; 
+    d_varY[j*numY+i] = sh_varY[tidy][tidx]; 
+
+}
+*/
 
 __global__ void
 d_explicit_xy_implicit_x(REAL* u, REAL* v, REAL* a, REAL* b, REAL* c,  
@@ -158,7 +192,7 @@ d_tridag_implicit_y(
     REAL* a, REAL* b, REAL* c, REAL* r, int n, REAL* u, REAL* uu, // tridag 
     unsigned numX, unsigned numY, unsigned outer, unsigned numZ, unsigned middle){
 
-    unsigned int j = blockDim.x*blockIdx.x + threadIdx.x; //numY
+    unsigned int j = blockDim.x*blockIdx.x + threadIdx.x; //numX
     unsigned int k = blockDim.y*blockIdx.y + threadIdx.y; //outer
 
     if(k >= outer || j >= middle)
@@ -182,6 +216,62 @@ d_tridag_implicit_y(
     }
 }
 
+/*
+__global__ void
+sh_tridag_implicit_y(  // u = myresult
+    REAL* a, REAL* b, REAL* c, REAL* r, int n, REAL* u, REAL* uu, // tridag 
+    unsigned numX, unsigned numY, unsigned outer, unsigned numZ, unsigned middle){
+
+    unsigned int j = blockDim.x*blockIdx.x + threadIdx.x; //numX
+    unsigned int k = blockDim.y*blockIdx.y + threadIdx.y; //outer
+
+    unsigned int gidz = blockDim.z * blockIdx.z + threadIdx.z; //
+    unsigned  zzz = gidz * outer * numZ;
+
+    if(k >= outer || j >= middle)
+        return;
+
+    __shared__ REAL 
+        sh_a[(int)T][(int)(T+1)], sh_b[(int)T][(int)(T+1)], 
+        sh_c[(int)T][(int)(T+1)], sh_r[(int)T][(int)(T+1)],
+        sh_u[(int)T][(int)(T+1)], sh_uu[(int)T][(int)(T+1)]; //
+
+    int tidy = threadIdx.y;
+    int tidx = threadIdx.x;
+
+   
+    __syncthreads();
+ 
+    REAL   beta;
+
+    u[UI(k,j,0)]  = r[ZZ(k,j,0)];   
+    sh_u[0][0] = r[ZZ(k,j,0)];
+
+    uu[ZZ(k,j,0)] = b[ZZ(k,j,0)]; 
+
+    for(int ii=1; ii< n; i++) {
+
+        sh_a[tidy][tidx] = a[zzz + k*numZ +j];
+        sh_b[tidy][tidx] = b[zzz + k*numZ +j];
+        sh_c[tidy][tidx] = c[zzz + k*numZ +j];
+        sh_r[tidy][tidx] = r[zzz + k*numZ +j];
+        sh_uu[tidy][tidx] = uu[zzz + k*numZ +j];
+        sh_u[tidy][tidx] = u[zzz+ k* numX +j]; // u and result are different!!
+
+        for(int ii= 0; ii< T; ii++){
+            beta  = a[ZZ(k,j,i)] / uu[ZZ(k,j,i-1)];
+
+            uu[ZZ(k,j,i)] = b[ZZ(k,j,i)] - beta*c[ZZ(k,j,i-1)];
+            u[UI(k,j,i)]  = r[ZZ(k,j,i)] - beta*u[UI(k,j,i-1)];
+        }
+    }
+
+    u[UI(k,j,n-1)] = u[UI(k,j,n-1)] / uu[ZZ(k,j,n-1)];
+    for(int i=n-2; i>=0; i--) {
+        u[UI(k,j,i)]  = (u[UI(k,j,i)]  - c[ZZ(k,j,i)]*u[UI(k,j,i+1)] ) / uu[ZZ(k,j,i)];
+    }
+}
+*/
 
 __global__ void
 d_tridag_implicit_x(
@@ -342,11 +432,13 @@ for(int g = numT-2;g>=0;--g) { // second outer loop, g
 
 
     //GPU updateParams  
-    int dimy = ceil( numY / T );
-    int dimx = ceil( numX / T );
-    dim3 block_2D_XY(T,T), grid_2D_XY(dimx,dimy);
-    d_updateParams<<< grid_2D_XY, block_2D_XY >>>(d_varX, d_varY, d_x, d_y, d_timeline, 
-        g, alpha, beta, nu, numX, numY);
+    // int dimy = ceil( numY / T );
+    // int dimx = ceil( numX / T );
+    // should exchange numX and numY  if use d_updateParams
+    // dim3 block_2D_XY(T,T), grid_2D_XY(ceil( numY / T ),ceil( numX / T ));
+    dim3 block_2D_XY(T,T), grid_2D_XY(ceil( numX / T ), ceil( numY / T ));   
+    d_updateParams<<< grid_2D_XY, block_2D_XY >>>(d_varX, d_varY, d_x, d_y, d_timeline, g, 
+         alpha, beta, nu, numX, numY);
     
     
      // GPU rollback Part_1  
@@ -356,7 +448,7 @@ for(int g = numT-2;g>=0;--g) { // second outer loop, g
 
 
    // GPU rollback part-2  
-    dim3 block_2D_OY(8,8), grid_2D_OY(ceil(numY/8.0), ceil(outer/8.0));
+    dim3 block_2D_OY(T,T), grid_2D_OY(ceil(numY/T), ceil((float)outer/T));
     d_tridag_implicit_x <<< grid_2D_OY, block_2D_OY >>> (d_a,d_b,d_c, d_u, numX,d_u,d_yyy,numX,numY,outer,numZ,numY);
 
 
@@ -367,7 +459,8 @@ for(int g = numT-2;g>=0;--g) { // second outer loop, g
 
 
 //----------/GPU rollback 4 
-    dim3 block_2D_OX(8,8), grid_2D_OX(ceil(numX/8.0), ceil(outer/8.0));
+    // dim3 block_2D_OX(T,T), grid_2D_OX(ceil(numX/T), ceil((float)outer/T));
+    dim3 block_2D_OX(T,T,1), grid_2D_OX(ceil(numX/T), ceil((float)outer/T), 1); // 3D kernel is also vaild
     d_tridag_implicit_y <<< grid_2D_OX, block_2D_OX >>> (d_a,d_b,d_c,d_yy,numY,d_result,d_yyy,numX,numY,outer,numZ,numX);
     
 
