@@ -373,26 +373,27 @@ sh_implicit_y(REAL* u_tr, REAL* v, REAL* a, REAL* b, REAL* c,  REAL* y,
 
     __shared__ REAL 
         sh_varY[T][T+1],  
-        // sh_dyy_tr[Y4+;,j
-        sh_u[T][T+1],    
-        sh_v[T][T+1],
-        sh_a[T][T+1], sh_y[T][T+1]; //
+        // sh_dyy[T][T+1],
+        // sh_u[T][T+1],    
+        // sh_v[T][T+1],
+        sh_a[T][T+1], 
+        sh_b[T][T+1], 
+        sh_c[T][T+1], 
+        sh_y[T][T+1]; //
 
     int tidy = threadIdx.y;
     int tidx = threadIdx.x;
-    // int gidz = blockIdx.z*blockDim.z*threadIdx.z;
 
-    // read data offset
-    // u+= gidz * numY * numX;
-    // v+= gidz * numX * numY;
 
     // copy data from global memory to shared memory
-    sh_u[tidy][tidx] = u_tr[XY(k,i,j)];
+    // sh_u[tidy][tidx] = u_tr[XY(k,i,j)];
     sh_a[tidy][tidx] = a[ZZ(k,i,j)];
-    sh_v[tidy][tidx] = v[XY(k,i,j)] ;
+    sh_b[tidy][tidx] = b[ZZ(k,i,j)];
+    sh_c[tidy][tidx] = c[ZZ(k,i,j)];
+    // sh_v[tidy][tidx] = v[XY(k,i,j)] ;
     sh_varY[tidy][tidx] = varY[i*numY +j];
     sh_y[tidy][tidx] = y[ZZ(k,i,j)];
-    // sh_dyy_tr[Y4]i,jdy] = (i<4) ? dyy_tr[Y4(i,j)]) : 0.0; // need transpose
+    // sh_dyy[tidy][tidx] = (i<4) ? dyy_tr[Y4(i,j)] : 0.0; // need transpose
 
     __syncthreads();
 
@@ -401,13 +402,13 @@ sh_implicit_y(REAL* u_tr, REAL* v, REAL* a, REAL* b, REAL* c,  REAL* y,
     // c[ZZ(k,i,j)] =       - 0.5*(0.5*varY[XY(0,i,j)]*dyy_tr[Y4(2,j)]);
     // y[ZZ(k,i,j)] = ( 1.0/(timeline[g+1]-timeline[g])) * u[YX(k,j,i)] - 0.5*v[XY(k,i,j)];
     sh_a[tidy][tidx] = - 0.5*(0.5* sh_varY[tidy][tidx] * dyy_tr[Y4(0,j)]);
-
-    b[ZZ(k,i,j)] = ( 1.0/(timeline[g+1]-timeline[g])) - 0.5*(0.5*sh_varY[tidy][tidx]*dyy_tr[Y4(1,j)]);
-
-    c[ZZ(k,i,j)] =       - 0.5*(0.5*sh_varY[tidy][tidx]*dyy_tr[Y4(2,j)]);
-    sh_y[tidy][tidx] = ( 1.0/(timeline[g+1]-timeline[g])) * sh_u[tidy][tidx]- 0.5*sh_v[tidy][tidx];
+    sh_b[tidy][tidx] = ( 1.0/(timeline[g+1]-timeline[g])) - 0.5*(0.5*sh_varY[tidy][tidx]*dyy_tr[Y4(1,j)]);
+    sh_c[tidy][tidx]  =       - 0.5*(0.5*sh_varY[tidy][tidx]*dyy_tr[Y4(2,j)]);
+    sh_y[tidy][tidx] = ( 1.0/(timeline[g+1]-timeline[g])) * u_tr[XY(k,i,j)] - 0.5*v[XY(k,i,j)];
 
     a[ZZ(k,i,j)] = sh_a[tidy][tidx];
+    a[ZZ(k,i,j)] = sh_b[tidy][tidx];
+    a[ZZ(k,i,j)] = sh_c[tidy][tidx];
     y[ZZ(k,i,j)] = sh_y[tidy][tidx];
 }
 
@@ -604,9 +605,8 @@ for(int g = numT-2;g>=0;--g) { // second outer loop, g
     dim3 grid_2D_Y4(1, ceil((float)numY/T));
     matTranspose2D<<< grid_2D_Y4, block_2D >>>(d_dyy, d_dyy_tr, numY, 4);
     sgmMatTranspose <<< grid_3D_OYX, block_3D>>>( d_u, d_u_tr, numY, numX );
-    // sgmMatTranspose <<< grid_3D_OXY, block_3D>>> (d_u_tr, d_u, numX, numY);
 
-    sh_implicit_y<<< grid_3D_OXY, block_3D >>>(d_u_tr,d_v,d_a,d_b,d_c, d_yy,
+    d_implicit_y_trans<<< grid_3D_OXY, block_3D >>>(d_u_tr,d_v,d_a,d_b,d_c, d_yy,
         d_varY,d_timeline, d_dyy_tr, g, numX, numY, outer, numZ);
 
 
