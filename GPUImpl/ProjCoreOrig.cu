@@ -358,7 +358,7 @@ d_implicit_y_trans(REAL* u_tr, REAL* v, REAL* a, REAL* b, REAL* c,  REAL* y,
 
 
 __global__ void
-sh_implicit_y(REAL* u, REAL* v, REAL* a, REAL* b, REAL* c,  REAL* y,  
+sh_implicit_y(REAL* u_tr, REAL* v, REAL* a, REAL* b, REAL* c,  REAL* y,  
     REAL* varY, REAL* timeline, REAL* dyy, 
     unsigned int g, unsigned numX, unsigned numY, unsigned outer, unsigned numZ){
    
@@ -372,7 +372,7 @@ sh_implicit_y(REAL* u, REAL* v, REAL* a, REAL* b, REAL* c,  REAL* y,
     __shared__ REAL 
         sh_varY[T][T+1],  
         // sh_dyy[T][T+1];
-        // sh_u[T][T+1],    
+        sh_u[T][T+1],    
         sh_v[T][T+1];
         // sh_a[T][T+1]; //
 
@@ -385,7 +385,7 @@ sh_implicit_y(REAL* u, REAL* v, REAL* a, REAL* b, REAL* c,  REAL* y,
     // v+= gidz * numX * numY;
 
     // copy data from global memory to shared memory
-    // sh_u[tidx][tidy] = u[YX(k,j,i)];
+    sh_u[tidy][tidx] = u_tr[XY(k,i,j)];
     // sh_a[tidy][tidx] = a[i*numY + j];
     sh_v[tidy][tidx] = v[XY(k,i,j)] ;
     sh_varY[tidy][tidx] = varY[i*numY +j];
@@ -402,7 +402,7 @@ sh_implicit_y(REAL* u, REAL* v, REAL* a, REAL* b, REAL* c,  REAL* y,
     b[ZZ(k,i,j)] = ( 1.0/(timeline[g+1]-timeline[g])) - 0.5*(0.5*sh_varY[tidy][tidx]*dyy[D4ID(j,1)]);
 
     c[ZZ(k,i,j)] =       - 0.5*(0.5*sh_varY[tidy][tidx]*dyy[D4ID(j,2)]);
-    y[ZZ(k,i,j)] = ( 1.0/(timeline[g+1]-timeline[g])) * u[YX(k,j,i)]- 0.5*sh_v[tidy][tidx];
+    y[ZZ(k,i,j)] = ( 1.0/(timeline[g+1]-timeline[g])) * sh_u[tidy][tidx]- 0.5*sh_v[tidy][tidx];
 
     // a[ZZ(k,i,j)] = sh_a[tidy][tidx];
 }
@@ -576,7 +576,7 @@ for(int g = numT-2;g>=0;--g) { // second outer loop, g
     sgmMatTranspose <<< grid_3D_OYX, block_3D>>>( d_u, d_u_tr, numY, numX );
     // sgmMatTranspose <<< grid_3D_OXY, block_3D>>> (d_u_tr, d_u, numX, numY);
 
-    d_implicit_y_trans<<< grid_3D_OXY, block_3D >>>(d_u_tr,d_v,d_a,d_b,d_c, d_yy,
+    sh_implicit_y<<< grid_3D_OXY, block_3D >>>(d_u_tr,d_v,d_a,d_b,d_c, d_yy,
         d_varY,d_timeline, d_dyy, g, numX, numY, outer, numZ);
     // sgmMatTranspose<<< >>>( d_u, d_u_tr, int rowsA, int colsA )
 
