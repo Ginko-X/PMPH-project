@@ -198,7 +198,7 @@ d_tridag_implicit_y(
  
     REAL   beta;
 
-    u[UI(k,j,0)]  = r[ZZ(k,j,0)];
+    u[UI(k,j,0)]  = r[ZZ(k,j,0)]; //u[k*numX*numY + j*numY + i]
     uu[ZZ(k,j,0)] = b[ZZ(k,j,0)]; 
 
     for(int i=1; i< n; i++) {
@@ -223,50 +223,66 @@ sh_tridag_implicit_y(  // u = myresult
     unsigned int j = blockDim.x*blockIdx.x + threadIdx.x; //numX
     unsigned int k = blockDim.y*blockIdx.y + threadIdx.y; //outer
 
-    unsigned int gidz = blockDim.z * blockIdx.z + threadIdx.z; //
-    unsigned  zzz = gidz * outer * numZ;
-
     if(k >= outer || j >= middle)
         return;
 
     __shared__ REAL 
-        sh_a[(int)T][(int)(T+1)], sh_b[(int)T][(int)(T+1)], 
-        sh_c[(int)T][(int)(T+1)], sh_r[(int)T][(int)(T+1)],
-        sh_u[(int)T][(int)(T+1)], sh_uu[(int)T][(int)(T+1)]; //
+        // sh_a[T][T+1],   otherwise Too much shared data
+        sh_b[T][T+1],
+        sh_c[T][T+1], sh_r[T][T+1],
+        sh_u[T][T+1], sh_uu[T][T+1]; //
 
     int tidy = threadIdx.y;
     int tidx = threadIdx.x;
 
-   
-    __syncthreads();
- 
     REAL   beta;
 
-    u[UI(k,j,0)]  = r[ZZ(k,j,0)];   
-    sh_u[0][0] = r[ZZ(k,j,0)];
+    for(int ii=0; ii< n; ii+=T) {
 
-    uu[ZZ(k,j,0)] = b[ZZ(k,j,0)]; 
+        // sh_a[tidy][tidx] = a[k*numZ*numZ +j*tidy + tidx];
+        sh_b[tidy][tidx] = b[k*numZ*numZ +j*numZ + tidx];
+        sh_c[tidy][tidx] = c[k*numZ*numZ +j*numZ + tidx];
+        sh_r[tidy][tidx] = r[k*numZ*numZ +j*numZ + tidx];
+        sh_uu[tidy][tidx] = uu[k*numZ*numZ +j*numZ + tidx];
+        sh_u[tidy][tidx] = u[k* numX *numY +j*numZ + tidx]; // u and result are different!!
+        
+        __syncthreads();
 
-    for(int ii=1; ii< n; i++) {
+        sh_u[tidy][0] = sh_r[tidy][0];
+        sh_uu[tidy][0] = sh_b[tidy][0];
+        __syncthreads();
 
-        sh_a[tidy][tidx] = a[zzz + k*numZ +j];
-        sh_b[tidy][tidx] = b[zzz + k*numZ +j];
-        sh_c[tidy][tidx] = c[zzz + k*numZ +j];
-        sh_r[tidy][tidx] = r[zzz + k*numZ +j];
-        sh_uu[tidy][tidx] = uu[zzz + k*numZ +j];
-        sh_u[tidy][tidx] = u[zzz+ k* numX +j]; // u and result are different!!
+        for(int i= 1; i< T; i++){
+            // beta  = a[ZZ(k,j,i)] / uu[ZZ(k,j,i-1)];
+            beta = a[ZZ(k,j,i)]  / sh_uu[tidy][i-1];
+            __syncthreads();
 
-        for(int ii= 0; ii< T; ii++){
-            beta  = a[ZZ(k,j,i)] / uu[ZZ(k,j,i-1)];
+            // uu[ZZ(k,j,i)] = b[ZZ(k,j,i)] - beta*c[ZZ(k,j,i-1)];
+            sh_uu[tidy][i] = sh_b[tidy][i] - beta*sh_c[tidy][i-1];
 
-            uu[ZZ(k,j,i)] = b[ZZ(k,j,i)] - beta*c[ZZ(k,j,i-1)];
-            u[UI(k,j,i)]  = r[ZZ(k,j,i)] - beta*u[UI(k,j,i-1)];
+            // u[UI(k,j,i)]  = r[ZZ(k,j,i)] - beta*u[UI(k,j,i-1)];
+            sh_u[tidy][i] = sh_r[tidy][i] - beta*sh_u[tidy][i-1];
+            __syncthreads();
+
         }
-    }
 
-    u[UI(k,j,n-1)] = u[UI(k,j,n-1)] / uu[ZZ(k,j,n-1)];
-    for(int i=n-2; i>=0; i--) {
-        u[UI(k,j,i)]  = (u[UI(k,j,i)]  - c[ZZ(k,j,i)]*u[UI(k,j,i+1)] ) / uu[ZZ(k,j,i)];
+        // u[UI(k,j,n-1)] = u[UI(k,j,n-1)] / uu[ZZ(k,j,n-1)];
+        sh_u[tidy][T-1] = sh_u[tidy][T-1]/ sh_uu[tidy][T-1];
+        __syncthreads();
+
+        // read c uu, write u
+        for(int i=T-2; i>=0; i--) {  
+            // u[UI(k,j,i)]  = (u[UI(k,j,i)]  - c[ZZ(k,j,i)]*u[UI(k,j,i+1)] ) / uu[ZZ(k,j,i)];
+            sh_u[tidy][i] = (sh_u[tidy][i] - sh_c[tidy][i]*sh_u[tidy][i+1])/ sh_uu[tidy][tidx];
+        }
+        __syncthreads();
+
+        // a[k*numZ*numZ +j*tidy + tidx]=sh_a[tidy][tidx] ;
+        // b[k*numZ*numZ +j*tidy + tidx]=sh_b[tidy][tidx] ;
+        // c[k*numZ*numZ +j*tidy + tidx]=sh_c[tidy][tidx] ;
+        u[k*numZ*numZ +j*tidy + tidx]=sh_u[tidy][tidx] ;
+        // uu[k*numZ*numZ+j*tidy +tidx] =sh_uu[tidy][tidx];
+
     }
 }
 */
@@ -311,7 +327,7 @@ d_implicit_y(REAL* u, REAL* v, REAL* a, REAL* b, REAL* c,  REAL* y,
 
 
     if(k >= outer || j >= numY || i >= numX)
-    return;
+        return;
 
     a[ZZ(k,i,j)] =       - 0.5*(0.5*varY[XY(0,i,j)]*dyy[D4ID(j,0)]);
     b[ZZ(k,i,j)] = ( 1.0/(timeline[g+1]-timeline[g])) - 0.5*(0.5*varY[XY(0,i,j)]*dyy[D4ID(j,1)]);
@@ -319,6 +335,64 @@ d_implicit_y(REAL* u, REAL* v, REAL* a, REAL* b, REAL* c,  REAL* y,
     y[ZZ(k,i,j)] = ( 1.0/(timeline[g+1]-timeline[g])) * u[YX(k,j,i)] - 0.5*v[XY(k,i,j)];
 }
 
+
+
+__global__ void
+sh_implicit_y(REAL* u, REAL* v, REAL* a, REAL* b, REAL* c,  REAL* y,  
+    REAL* varY, REAL* timeline, REAL* dyy, 
+    unsigned int g, unsigned numX, unsigned numY, unsigned outer, unsigned numZ){
+   
+    unsigned int k = blockDim.z * blockIdx.z + threadIdx.z; //Outer
+    unsigned int i = blockDim.y * blockIdx.y + threadIdx.y; //numX
+    unsigned int j = blockDim.x * blockIdx.x + threadIdx.x; //numY
+
+    if(k >= outer || j >= numY || i >= numX)
+        return;
+
+    __shared__ REAL 
+        sh_varY[T][T+1],  
+        sh_dyy[T][T+1], 
+        sh_u[T][T+1],    sh_v[T][T+1]; //
+
+    int tidy = threadIdx.y;
+    int tidx = threadIdx.x;
+    int gidz = blockIdx.z*blockDim.z*threadIdx.z;
+
+    // read data offset
+    u+= gidz * numY * numX;
+    v+= gidz * numX * numY;
+    // varY+= gidz * num * numX;
+    // dyy+= gidz * numY * numX;
+
+    // write data offset
+    // a+=gidz*numZ*numZ;
+    // b+=gidz*numZ*numZ;
+    // c+=gidz*numZ*numZ;
+    // y+=gidz*numZ*numZ;
+
+    // copy data from global memory to shared memory
+    sh_u[tidy][tidx] = u[i*numY+j];
+    sh_v[tidy][tidx] = v[j*numX + i];
+    sh_varY[tidy][tidx] = varY[i*numX +j];
+    sh_dyy[tidy][tidx] = dyy[i*4 + j];
+
+    __syncthreads();
+
+    // i=blockIdx.y*T+tidx; j=blockIdx.x*T+tidy;
+    // trA[j*rowsA+i] = tile[tidx][tidy];
+
+    // j = tidx, i = tidy
+    // a[ZZ(k,i,j)] =       - 0.5*(0.5*varY[XY(0,i,j)]*dyy[D4ID(j,0)]);
+    // b[ZZ(k,i,j)] = ( 1.0/(timeline[g+1]-timeline[g])) - 0.5*(0.5*varY[XY(0,i,j)]*dyy[D4ID(j,1)]);
+    // c[ZZ(k,i,j)] =       - 0.5*(0.5*varY[XY(0,i,j)]*dyy[D4ID(j,2)]);
+    // y[ZZ(k,i,j)] = ( 1.0/(timeline[g+1]-timeline[g])) * u[YX(k,j,i)] - 0.5*v[XY(k,i,j)];
+    a[ZZ(k,i,j)] = - 0.5*(0.5* sh_varY[tidy][tidx] * sh_dyy[tidx][0]);
+
+    b[ZZ(k,i,j)] = ( 1.0/(timeline[g+1]-timeline[g])) - 0.5*(0.5*sh_varY[tidy][tidx]*sh_dyy[tidx][1]);
+
+    c[ZZ(k,i,j)] =       - 0.5*(0.5*sh_varY[tidy][tidx]*sh_dyy[tidx][2]);
+    y[ZZ(k,i,j)] = ( 1.0/(timeline[g+1]-timeline[g])) * sh_u[tidx][tidy] - 0.5* sh_v[tidy][tidx];
+}
 
 
 //{{{ wrapper 
@@ -451,14 +525,14 @@ for(int g = numT-2;g>=0;--g) { // second outer loop, g
 
 
    // GPU rollback part 3
-    const dim3 grid_3D_OXY(ceil(numY/8.0), ceil(numX/8.0), ceil(outer/8.0) );
-    d_implicit_y<<< grid_3D_OXY, block_3D_888 >>>(d_u,d_v,d_a,d_b,d_c, d_yy,
+    const dim3 grid_3D_OXY(ceil(numY/32.0), ceil(numX/16.0), ceil(outer/8.0) );
+    sh_implicit_y<<< grid_3D_OXY, block_3D_888 >>>(d_u,d_v,d_a,d_b,d_c, d_yy,
         d_varY,d_timeline, d_dyy, g, numX, numY, outer, numZ);
 
 
 //----------/GPU rollback 4 
-    // dim3 block_2D_OX(T,T), grid_2D_OX(ceil(numX/T), ceil((float)outer/T));
-    dim3 block_2D_OX(T,T,1), grid_2D_OX(ceil(numX/T), ceil((float)outer/T), 1); // 3D kernel is also vaild
+    dim3 block_2D_OX(T,T), grid_2D_OX(ceil(numX/T), ceil((float)outer/T));
+    // dim3 block_2D_OX(T,T,1), grid_2D_OX(ceil(numX/T), ceil((float)outer/T), 1); // 3D kernel is also vaild
     d_tridag_implicit_y <<< grid_2D_OX, block_2D_OX >>> (d_a,d_b,d_c,d_yy,numY,d_result,d_yyy,numX,numY,outer,numZ,numX);
     
 
