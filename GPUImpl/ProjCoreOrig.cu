@@ -98,7 +98,6 @@ d_updateParams(REAL* d_varX, REAL* d_varY, REAL* d_x, REAL* d_y,  REAL* d_timeli
 
 }
 
-/*
 __global__ void
 d_updateParams_sh(REAL* d_varX, REAL* d_varY, REAL* d_x, REAL* d_y, REAL* d_timeline, 
     unsigned int g, REAL alpha, REAL beta, REAL nu, 
@@ -117,21 +116,20 @@ d_updateParams_sh(REAL* d_varX, REAL* d_varY, REAL* d_x, REAL* d_y, REAL* d_time
         return;
 
     // shared memory store operation
-    sh_varX[tidy][tidx] = d_varX[j*numY+i];
-    sh_varY[tidy][tidx] = d_varY[j*numY+i]; 
-    sh_x[tidy][tidx] = d_x[j];
-    sh_y[tidy][tidx] = d_y[i];
-    sh_timeline[tidy][tidx] = d_timeline[g]; 
+    // sh_varX[tidy][tidx] = d_varX[j*numY+i];
+    // sh_varY[tidy][tidx] = d_varY[j*numY+i]; 
+    sh_x[tidy] = d_x[j];
+    sh_y[tidx] = d_y[i];
     __syncthreads();
 
-    sh_varX[tidy][tidx] = exp(2.0*( beta*log(sh_x[tidy][tidx]) +  sh_y[tidy][tidx] - 0.5*nu*nu*sh_timeline[tidy][tidx]));
-    sh_varY[tidy][tidx] = exp(2.0*( alpha*log(sh_x[tidy][tidx]) + sh_y[tidy][tidx] - 0.5*nu*nu*sh_timeline[tidy][tidx]));
+    d_varX[j*numY+i] = exp(2.0*( beta*log(sh_x[tidy]) +  sh_y[tidx] - 0.5*nu*nu*d_timeline[g]));
+    d_varY[j*numY+i] = exp(2.0*( alpha*log(sh_x[tidy]) + sh_y[tidx] - 0.5*nu*nu*d_timeline[g]));
 
-    d_varX[j*numY+i] = sh_varX[tidy][tidx]; 
-    d_varY[j*numY+i] = sh_varY[tidy][tidx]; 
+    // d_varX[j*numY+i] = sh_varX[tidy][tidx]; 
+    // d_varY[j*numY+i] = sh_varY[tidy][tidx]; 
 
 }
-*/
+
 
 __global__ void
 d_explicit_xy_implicit_x(REAL* u, REAL* v, REAL* a, REAL* b, REAL* c,  
@@ -435,9 +433,9 @@ for(int g = numT-2;g>=0;--g) { // second outer loop, g
     // int dimy = ceil( numY / T );
     // int dimx = ceil( numX / T );
     // should exchange numX and numY  if use d_updateParams
-    // dim3 block_2D_XY(T,T), grid_2D_XY(ceil( numY / T ),ceil( numX / T ));
-    dim3 block_2D_XY(T,T), grid_2D_XY(ceil( numX / T ), ceil( numY / T ));   
-    d_updateParams<<< grid_2D_XY, block_2D_XY >>>(d_varX, d_varY, d_x, d_y, d_timeline, g, 
+    dim3 block_2D_XY(T,T), grid_2D_XY(ceil( numY / T ),ceil( numX / T )); // sh
+    // dim3 block_2D_XY(T,T), grid_2D_XY(ceil( numX / T ), ceil( numY / T ));   
+    d_updateParams_sh<<< grid_2D_XY, block_2D_XY >>>(d_varX, d_varY, d_x, d_y, d_timeline,g, 
          alpha, beta, nu, numX, numY);
     
     
