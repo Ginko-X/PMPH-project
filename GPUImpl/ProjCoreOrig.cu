@@ -573,7 +573,7 @@ void   run_OrigCPU(
     dim3 grid_2D_OY(ceil(numY/T), ceil((float)outer/T));
     dim3 grid_2D_YX(ceil( numX / T ), ceil( numY / T )); 
 
-    dim3 block_3D(32, 32, 1);
+    dim3 block_3D(T, T, 1);
     dim3 grid_3D_OXY(ceil(numY/32.0), ceil(numX/32.0), ceil(outer/1.0));
     dim3 grid_3D_OYX(ceil(numX/32.0), ceil(numY/32.0),ceil(outer/1.0) );
     dim3 grid_3D_OZZ(ceil(numZ/32.0), ceil(numZ/32.0),ceil(outer/1.0) );
