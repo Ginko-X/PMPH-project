@@ -504,11 +504,11 @@ for(int g = numT-2;g>=0;--g) { // second outer loop, g
 
 
     //GPU updateParams  
-    d_updateParams<<< grid_2D_YX, block_2D >>>(d_varX, d_varY, d_x, d_y, d_timeline,g, 
+    // d_updateParams<<< grid_2D_YX, block_2D >>>(d_varX, d_varY, d_x, d_y, d_timeline,g, 
+    //      alpha, beta, nu, numX, numY);
+    dim3 block_2D(T,T), grid_2D_XY(ceil( numY / T ),ceil( numX / T )); // sh
+    d_updateParams_sh<<< grid_2D_XY, block_2D >>>(d_varX, d_varY, d_x, d_y, d_timeline,g, 
          alpha, beta, nu, numX, numY);
-    // dim3 block_2D(T,T), grid_2D_YX(ceil( numY / T ),ceil( numX / T )); // sh
-    // d_updateParams_sh<<< grid_2D_YX, block_2D >>>(d_varX, d_varY, d_x, d_y, d_timeline,g, 
-         // alpha, beta, nu, numX, numY);
     
     
      // GPU rollback Part_1 
