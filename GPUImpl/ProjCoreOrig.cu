@@ -351,39 +351,40 @@ sh_implicit_y(REAL* u, REAL* v, REAL* a, REAL* b, REAL* c,  REAL* y,
 
     __shared__ REAL 
         sh_varY[T][T+1],  
-        sh_dyy[T][T+1],
-        sh_u[T][T+1],    sh_v[T][T+1]; //
+        // sh_dyy[T][T+1];
+        // sh_u[T][T+1],    
+        sh_v[T][T+1];
+        // sh_a[T][T+1]; //
 
     int tidy = threadIdx.y;
     int tidx = threadIdx.x;
-    int gidz = blockIdx.z*blockDim.z*threadIdx.z;
+    // int gidz = blockIdx.z*blockDim.z*threadIdx.z;
 
     // read data offset
     // u+= gidz * numY * numX;
     // v+= gidz * numX * numY;
 
     // copy data from global memory to shared memory
-    // sh_u[tidy][tidx] = u[i*numX+j];
-    // sh_v[tidy][tidx] = v[j*numX + i];
+    // sh_u[tidx][tidy] = u[YX(k,j,i)];
+    // sh_a[tidy][tidx] = a[i*numY + j];
+    sh_v[tidy][tidx] = v[XY(k,i,j)] ;
     sh_varY[tidy][tidx] = varY[i*numY +j];
-    sh_dyy[tidy][tidx] = (i<4) ? dyy[j*4 + i] : 0.0;
+    // sh_dyy[tidx][tidy] = (i<4) ? dyy[D4ID(j,i)]) : 0.0; // need transpose
 
     __syncthreads();
 
-    // i=blockIdx.y*T+tidx; j=blockIdx.x*T+tidy;
-    // trA[j*rowsA+i] = tile[tidx][tidy];
-
-    // j = tidx, i = tidy
     // a[ZZ(k,i,j)] =       - 0.5*(0.5*varY[XY(0,i,j)]*dyy[D4ID(j,0)]);
     // b[ZZ(k,i,j)] = ( 1.0/(timeline[g+1]-timeline[g])) - 0.5*(0.5*varY[XY(0,i,j)]*dyy[D4ID(j,1)]);
     // c[ZZ(k,i,j)] =       - 0.5*(0.5*varY[XY(0,i,j)]*dyy[D4ID(j,2)]);
     // y[ZZ(k,i,j)] = ( 1.0/(timeline[g+1]-timeline[g])) * u[YX(k,j,i)] - 0.5*v[XY(k,i,j)];
-    a[ZZ(k,i,j)] = - 0.5*(0.5* sh_varY[tidy][tidx] * sh_dyy[tidx][0]);
+    a[ZZ(k,i,j)] = - 0.5*(0.5* sh_varY[tidy][tidx] * dyy[D4ID(j,0)]);
 
-    b[ZZ(k,i,j)] = ( 1.0/(timeline[g+1]-timeline[g])) - 0.5*(0.5*sh_varY[tidy][tidx]*sh_dyy[tidx][1]);
+    b[ZZ(k,i,j)] = ( 1.0/(timeline[g+1]-timeline[g])) - 0.5*(0.5*sh_varY[tidy][tidx]*dyy[D4ID(j,1)]);
 
-    c[ZZ(k,i,j)] =       - 0.5*(0.5*sh_varY[tidy][tidx]*sh_dyy[tidx][2]);
-    y[ZZ(k,i,j)] = ( 1.0/(timeline[g+1]-timeline[g])) * u[YX(k,j,i)] - 0.5*v[XY(k,i,j)];
+    c[ZZ(k,i,j)] =       - 0.5*(0.5*sh_varY[tidy][tidx]*dyy[D4ID(j,2)]);
+    y[ZZ(k,i,j)] = ( 1.0/(timeline[g+1]-timeline[g])) * u[YX(k,j,i)]- 0.5*sh_v[tidy][tidx];
+
+    // a[ZZ(k,i,j)] = sh_a[tidy][tidx];
 }
 
 
@@ -547,7 +548,7 @@ for(int g = numT-2;g>=0;--g) { // second outer loop, g
    // GPU rollback part 3
 
     // sgmMatTranspose<<< >>>( d_u, d_tr_u, int rowsA, int colsA )
-    d_implicit_y<<< grid_3D_OXY, block_3D >>>(d_u,d_v,d_a,d_b,d_c, d_yy,
+    sh_implicit_y<<< grid_3D_OXY, block_3D >>>(d_u,d_v,d_a,d_b,d_c, d_yy,
         d_varY,d_timeline, d_dyy, g, numX, numY, outer, numZ);
     // sgmMatTranspose<<< >>>( d_u, d_tr_u, int rowsA, int colsA )
 
