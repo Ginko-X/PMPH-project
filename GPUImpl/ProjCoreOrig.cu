@@ -364,12 +364,6 @@ sh_implicit_y(REAL* u, REAL* v, REAL* a, REAL* b, REAL* c,  REAL* y,
     // varY+= gidz * num * numX;
     // dyy+= gidz * numY * numX;
 
-    // write data offset
-    // a+=gidz*numZ*numZ;
-    // b+=gidz*numZ*numZ;
-    // c+=gidz*numZ*numZ;
-    // y+=gidz*numZ*numZ;
-
     // copy data from global memory to shared memory
     sh_u[tidy][tidx] = u[i*numY+j];
     sh_v[tidy][tidx] = v[j*numX + i];
@@ -494,46 +488,46 @@ void   run_OrigCPU(
 
 
  // GPU setPayoff
-    dim3 block_3D_888(8, 8, 8);
-    dim3 grid_3D_OXY(ceil(numY/8.0), ceil(numX/8.0), ceil(outer/8.0));
-    d_setPayoff<<<grid_3D_OXY, block_3D_888>>>(d_result, d_x, numY, numX, outer);
+    dim3 block_3D(16, 8, 8);
+    dim3 grid_3D_OXY(ceil(numY/16.0), ceil(numX/8.0), ceil(outer/8.0));
+    d_setPayoff<<<grid_3D_OXY, block_3D>>>(d_result, d_x, numY, numX, outer);
    
+    dim3 block_2D(T,T);
+    dim3 grid_2D_OX(ceil(numX/T), ceil((float)outer/T));
+    dim3 grid_2D_OY(ceil(numY/T), ceil((float)outer/T));
+    dim3 grid_2D_YX(ceil( numX / T ), ceil( numY / T ));   
+    dim3 grid_3D_OYX(ceil(numX/16.0), ceil(numY/8.0),ceil(outer/8.0) );
+
 
 // timeline loop
 for(int g = numT-2;g>=0;--g) { // second outer loop, g
 
 
     //GPU updateParams  
-    // int dimy = ceil( numY / T );
-    // int dimx = ceil( numX / T );
-    // should exchange numX and numY  if use d_updateParams
-    dim3 block_2D_XY(T,T), grid_2D_XY(ceil( numY / T ),ceil( numX / T )); // sh
-    // dim3 block_2D_XY(T,T), grid_2D_XY(ceil( numX / T ), ceil( numY / T ));   
-    d_updateParams_sh<<< grid_2D_XY, block_2D_XY >>>(d_varX, d_varY, d_x, d_y, d_timeline,g, 
+    d_updateParams<<< grid_2D_YX, block_2D >>>(d_varX, d_varY, d_x, d_y, d_timeline,g, 
          alpha, beta, nu, numX, numY);
+    // dim3 block_2D(T,T), grid_2D_YX(ceil( numY / T ),ceil( numX / T )); // sh
+    // d_updateParams_sh<<< grid_2D_YX, block_2D >>>(d_varX, d_varY, d_x, d_y, d_timeline,g, 
+         // alpha, beta, nu, numX, numY);
     
     
-     // GPU rollback Part_1  
-    dim3 grid_3D_OYX(ceil(numX/8.0), ceil(numY/8.0),ceil(outer/8.0) );
-    d_explicit_xy_implicit_x<<<grid_3D_OYX, block_3D_888>>>(d_u,d_v,d_a,d_b,d_c,
+     // GPU rollback Part_1 
+    d_explicit_xy_implicit_x<<<grid_3D_OYX, block_3D>>>(d_u,d_v,d_a,d_b,d_c,
         d_varX,d_varY,d_timeline,d_dxx,d_dyy,d_result, g, numX, numY, outer, numZ);
 
 
    // GPU rollback part-2  
-    dim3 block_2D_OY(T,T), grid_2D_OY(ceil(numY/T), ceil((float)outer/T));
-    d_tridag_implicit_x <<< grid_2D_OY, block_2D_OY >>> (d_a,d_b,d_c, d_u, numX,d_u,d_yyy,numX,numY,outer,numZ,numY);
+    d_tridag_implicit_x <<< grid_2D_OY, block_2D >>> (d_a,d_b,d_c, d_u, numX,d_u,d_yyy,numX,numY,outer,numZ,numY);
 
 
    // GPU rollback part 3
-    const dim3 grid_3D_OXY(ceil(numY/32.0), ceil(numX/16.0), ceil(outer/8.0) );
-    sh_implicit_y<<< grid_3D_OXY, block_3D_888 >>>(d_u,d_v,d_a,d_b,d_c, d_yy,
+    d_implicit_y<<< grid_3D_OXY, block_3D >>>(d_u,d_v,d_a,d_b,d_c, d_yy,
         d_varY,d_timeline, d_dyy, g, numX, numY, outer, numZ);
 
 
 //----------/GPU rollback 4 
-    dim3 block_2D_OX(T,T), grid_2D_OX(ceil(numX/T), ceil((float)outer/T));
-    // dim3 block_2D_OX(T,T,1), grid_2D_OX(ceil(numX/T), ceil((float)outer/T), 1); // 3D kernel is also vaild
-    d_tridag_implicit_y <<< grid_2D_OX, block_2D_OX >>> (d_a,d_b,d_c,d_yy,numY,d_result,d_yyy,numX,numY,outer,numZ,numX);
+    // dim3 block_2D(T,T,1), grid_2D_OX(ceil(numX/T), ceil((float)outer/T), 1); // 3D kernel is also vaild
+    d_tridag_implicit_y <<< grid_2D_OX, block_2D >>> (d_a,d_b,d_c,d_yy,numY,d_result,d_yyy,numX,numY,outer,numZ,numX);
     
 
 } // Timeline loop end
