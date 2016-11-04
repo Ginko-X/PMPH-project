@@ -285,78 +285,6 @@ d_tridag_implicit_y(
     }
 }
 
-/*
-__global__ void
-sh_tridag_implicit_y(  // u = myresult
-    REAL* a, REAL* b, REAL* c, REAL* r, int n, REAL* u, REAL* uu, // tridag 
-    unsigned numX, unsigned numY, unsigned outer, unsigned numZ, unsigned middle){
-
-    unsigned int j = blockDim.x*blockIdx.x + threadIdx.x; //numX
-    unsigned int k = blockDim.y*blockIdx.y + threadIdx.y; //outer
-
-    if(k >= outer || j >= middle)
-        return;
-
-    __shared__ REAL 
-        // sh_a[T][T+1],   otherwise Too much shared data
-        sh_b[T][T+1],
-        sh_c[T][T+1], sh_r[T][T+1],
-        sh_u[T][T+1], sh_uu[T][T+1]; //
-
-    int tidy = threadIdx.y;
-    int tidx = threadIdx.x;
-
-    REAL   beta;
-
-    for(int ii=0; ii< n; ii+=T) {
-
-        // sh_a[tidy][tidx] = a[k*numZ*numZ +j*tidy + tidx];
-        sh_b[tidy][tidx] = b[k*numZ*numZ +j*numZ + tidx];
-        sh_c[tidy][tidx] = c[k*numZ*numZ +j*numZ + tidx];
-        sh_r[tidy][tidx] = r[k*numZ*numZ +j*numZ + tidx];
-        sh_uu[tidy][tidx] = uu[k*numZ*numZ +j*numZ + tidx];
-        sh_u[tidy][tidx] = u[k* numX *numY +j*numZ + tidx]; // u and result are different!!
-        
-        __syncthreads();
-
-        sh_u[tidy][0] = sh_r[tidy][0];
-        sh_uu[tidy][0] = sh_b[tidy][0];
-        __syncthreads();
-
-        for(int i= 1; i< T; i++){
-            // beta  = a[ZZ(k,j,i)] / uu[ZZ(k,j,i-1)];
-            beta = a[ZZ(k,j,i)]  / sh_uu[tidy][i-1];
-            __syncthreads();
-
-            // uu[ZZ(k,j,i)] = b[ZZ(k,j,i)] - beta*c[ZZ(k,j,i-1)];
-            sh_uu[tidy][i] = sh_b[tidy][i] - beta*sh_c[tidy][i-1];
-
-            // u[UI(k,j,i)]  = r[ZZ(k,j,i)] - beta*u[UI(k,j,i-1)];
-            sh_u[tidy][i] = sh_r[tidy][i] - beta*sh_u[tidy][i-1];
-            __syncthreads();
-
-        }
-
-        // u[UI(k,j,n-1)] = u[UI(k,j,n-1)] / uu[ZZ(k,j,n-1)];
-        sh_u[tidy][T-1] = sh_u[tidy][T-1]/ sh_uu[tidy][T-1];
-        __syncthreads();
-
-        // read c uu, write u
-        for(int i=T-2; i>=0; i--) {  
-            // u[UI(k,j,i)]  = (u[UI(k,j,i)]  - c[ZZ(k,j,i)]*u[UI(k,j,i+1)] ) / uu[ZZ(k,j,i)];
-            sh_u[tidy][i] = (sh_u[tidy][i] - sh_c[tidy][i]*sh_u[tidy][i+1])/ sh_uu[tidy][tidx];
-        }
-        __syncthreads();
-
-        // a[k*numZ*numZ +j*tidy + tidx]=sh_a[tidy][tidx] ;
-        // b[k*numZ*numZ +j*tidy + tidx]=sh_b[tidy][tidx] ;
-        // c[k*numZ*numZ +j*tidy + tidx]=sh_c[tidy][tidx] ;
-        u[k*numZ*numZ +j*tidy + tidx]=sh_u[tidy][tidx] ;
-        // uu[k*numZ*numZ+j*tidy +tidx] =sh_uu[tidy][tidx];
-
-    }
-}
-*/
 
 __global__ void
 d_tridag_implicit_x(
@@ -386,6 +314,8 @@ d_tridag_implicit_x(
         u[UI(k,j,i)]  = (u[UI(k,j,i)]  - c[ZZ(k,j,i)]*u[UI(k,j,i+1)] ) / uu[ZZ(k,j,i)];
     }
 }
+
+
 
 __global__ void
 d_implicit_y(REAL* u, REAL* v, REAL* a, REAL* b, REAL* c,  REAL* y,  
@@ -490,9 +420,9 @@ __global__ void sgmMatTranspose( REAL* A, REAL* trA, int rowsA, int colsA ){
     int tidx = threadIdx.x;
     int tidy = threadIdx.y;
   
-    unsigned int k = blockDim.z * blockIdx.z + threadIdx.z; //Outer
-    unsigned int i = blockDim.y * blockIdx.y + threadIdx.y; //numX
-    unsigned int j = blockDim.x * blockIdx.x + threadIdx.x; //numY
+    unsigned int k = blockDim.z * blockIdx.z + threadIdx.z; 
+    unsigned int i = blockDim.y * blockIdx.y + threadIdx.y; 
+    unsigned int j = blockDim.x * blockIdx.x + threadIdx.x; 
     
     A += k*rowsA*colsA; 
     trA += k*rowsA*colsA;
@@ -506,7 +436,6 @@ __global__ void sgmMatTranspose( REAL* A, REAL* trA, int rowsA, int colsA ){
     
     if( j < colsA && i < rowsA )
         trA[j*rowsA+i] = tile[tidx][tidy];
-        // trA[XY(k,j,i)] = tile[tidx][tidy];
 }
 
 
@@ -624,7 +553,7 @@ void   run_OrigCPU(
     cudaMalloc((void**)&d_u , memsize_OXY); //d_u : [outer][numY][numX]
     cudaMalloc((void**)&d_v , memsize_OXY); //d_v : [outer][numX][numY]
 
-// for transpose 
+// variables for transposition
     REAL * d_u_tr;
     REAL * d_dyy_tr;
     REAL * d_a_tr;
@@ -636,6 +565,18 @@ void   run_OrigCPU(
     cudaMalloc((void**)&d_b_tr, memsize_OZZ);
     cudaMalloc((void**)&d_c_tr, memsize_OZZ);
 
+   
+    dim3 block_2D(T,T);
+    dim3 grid_2D_4Y(1, ceil((float)numY/T));
+    dim3 grid_2D_XY(ceil( numY / T ),ceil( numX / T )); 
+    dim3 grid_2D_OX(ceil(numX/T), ceil((float)outer/T));
+    dim3 grid_2D_OY(ceil(numY/T), ceil((float)outer/T));
+    dim3 grid_2D_YX(ceil( numX / T ), ceil( numY / T )); 
+
+    dim3 block_3D(32, 32, 1);
+    dim3 grid_3D_OXY(ceil(numY/32.0), ceil(numX/32.0), ceil(outer/1.0));
+    dim3 grid_3D_OYX(ceil(numX/32.0), ceil(numY/32.0),ceil(outer/1.0) );
+    dim3 grid_3D_OZZ(ceil(numZ/32.0), ceil(numZ/32.0),ceil(outer/1.0) );
 
 
 //GPU init 
@@ -643,39 +584,25 @@ void   run_OrigCPU(
     initOperator_GPU( d_x, numX, d_dxx);
     initOperator_GPU( d_y, numY, d_dyy);
 
-
  // GPU setPayoff
-    dim3 block_3D(32, 32, 1);
-    dim3 grid_3D_OXY(ceil(numY/32.0), ceil(numX/32.0), ceil(outer/1.0));
     d_setPayoff<<<grid_3D_OXY, block_3D>>>(d_result, d_x, numY, numX, outer);
-   
-    dim3 block_2D(T,T);
-    dim3 grid_2D_OX(ceil(numX/T), ceil((float)outer/T));
-    dim3 grid_2D_OY(ceil(numY/T), ceil((float)outer/T));
-    dim3 grid_2D_YX(ceil( numX / T ), ceil( numY / T ));   
-    dim3 grid_3D_OYX(ceil(numX/32.0), ceil(numY/32.0),ceil(outer/1.0) );
 
+    
 
 // timeline loop
 for(int g = numT-2;g>=0;--g) { // second outer loop, g
 
-
-    //GPU updateParams  
+//----GPU updateParams  
     // d_updateParams<<< grid_2D_YX, block_2D >>>(d_varX, d_varY, d_x, d_y, d_timeline,g, 
     //      alpha, beta, nu, numX, numY);
-    dim3 block_2D(T,T), grid_2D_XY(ceil( numY / T ),ceil( numX / T )); // sh
     // d_updateParams_sh<<< grid_2D_XY, block_2D >>>(d_varX, d_varY, d_x, d_y, d_timeline,g, 
     //      alpha, beta, nu, numX, numY);
     d_updateParams_interchange<<< grid_2D_XY, block_2D >>>(d_varX, d_varY, d_x, d_y, d_timeline,g, 
          alpha, beta, nu, numX, numY);
     
 //---- GPU rollback Part_1 
-    // transpose d_dyy
-    dim3 grid_2D_4Y(1, ceil((float)numY/T));
-    matTranspose2D<<< grid_2D_4Y, block_2D >>>(d_dyy, d_dyy_tr, numY, 4);
-
-    // dim3 grid_2D_Y4(ceil((float)numY/T),1);
-    // matTranspose2D<<< grid_2D_Y4, block_2D >>>(d_dyy_tr, d_dyy, 4, numY);
+    
+    matTranspose2D<<< grid_2D_4Y, block_2D >>>(d_dyy, d_dyy_tr, numY, 4); // transpose d_dyy
 
     // d_explicit_xy_implicit_x<<<grid_3D_OYX, block_3D>>>(d_u,d_v,d_a,d_b,d_c,
     //     d_varX,d_varY,d_timeline,d_dxx,d_dyy,d_result, g, numX, numY, outer, numZ);
@@ -683,8 +610,7 @@ for(int g = numT-2;g>=0;--g) { // second outer loop, g
     d_explicit_xy_implicit_x_interchange<<<grid_3D_OXY, block_3D>>>(d_u_tr,d_v,d_a_tr,d_b_tr,d_c_tr,
         d_varX,d_varY,d_timeline,d_dxx,d_dyy_tr,d_result, g, numX, numY, outer, numZ);
 
-    dim3 grid_3D_OZZ(ceil(numZ/32.0), ceil(numZ/32.0),ceil(outer/1.0) );
-
+    // transpose back the variables
     sgmMatTranspose <<< grid_3D_OXY, block_3D>>>( d_u_tr, d_u, numX, numY );
 
     sgmMatTranspose <<< grid_3D_OZZ, block_3D>>>( d_a_tr, d_a, numZ, numZ );
@@ -692,46 +618,36 @@ for(int g = numT-2;g>=0;--g) { // second outer loop, g
     sgmMatTranspose <<< grid_3D_OZZ, block_3D>>>( d_c_tr, d_c, numZ, numZ );
 
 
-
-   // GPU rollback part-2  
+//------ GPU rollback part-2  
     d_tridag_implicit_x <<< grid_2D_OY, block_2D >>> (d_a,d_b,d_c, d_u, numX,d_u,d_yyy,numX,numY,outer,numZ,numY);
 
 
-   // GPU rollback part 3
-    
-
-    // dim3 grid_2D_4Y(1, ceil((float)numY/T));
-    // matTranspose2D<<< grid_2D_4Y, block_2D >>>(d_dyy, d_dyy_tr, numY, 4);
-
-
-
-    sgmMatTranspose <<< grid_3D_OYX, block_3D>>>( d_u, d_u_tr, numY, numX );
-
+// -------GPU rollback part-3
+    sgmMatTranspose <<< grid_3D_OYX, block_3D>>>( d_u, d_u_tr, numY, numX );     // transpose u    
+ 
     d_implicit_y_trans<<< grid_3D_OXY, block_3D >>>(d_u_tr,d_v,d_a,d_b,d_c, d_yy,
         d_varY,d_timeline, d_dyy_tr, g, numX, numY, outer, numZ);
 
 
-
-
-//----------/GPU rollback 4 
-    // dim3 block_2D(T,T,1), grid_2D_OX(ceil(numX/T), ceil((float)outer/T), 1); // 3D kernel is also vaild
+//---------- GPU rollback part-4 
     d_tridag_implicit_y <<< grid_2D_OX, block_2D >>> (d_a,d_b,d_c,d_yy,numY,d_result,d_yyy,numX,numY,outer,numZ,numX);
     
 
 } // Timeline loop end
 
-
+    // read the final result
     cudaMemcpy( h_result         , d_result       , memsize_OXY        , cudaMemcpyDeviceToHost);
 
-    // read the final result
     #pragma omp parallel for default(shared) schedule(static) 
     for( unsigned  k = 0; k < outer; ++ k )  //outermost loop k
-        res[k] = h_result[XY(k,myXindex,myYindex)];  //  tested OK
+        res[k] = h_result[XY(k,myXindex,myYindex)];  
+
 
     cudaFree(d_x); cudaFree(d_y); cudaFree(d_dxx);cudaFree(d_dyy); cudaFree(d_timeline); 
     cudaFree(d_result); cudaFree(d_varX); cudaFree(d_varY);
     cudaFree(d_a); cudaFree(d_b);cudaFree(d_c); cudaFree(d_yy);cudaFree(d_yyy); 
-    cudaFree(d_u); cudaFree(d_v);
+    cudaFree(d_u); cudaFree(d_v); 
+    cudaFree(d_u_tr); cudaFree(d_dyy_tr); cudaFree(d_a_tr); cudaFree(d_b_tr); cudaFree(d_c_tr);
     
     free(h_result);
  //   #endif
