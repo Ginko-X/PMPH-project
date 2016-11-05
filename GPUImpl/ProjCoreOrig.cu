@@ -1,4 +1,5 @@
 
+// 全部函数测试有效 最终版本
 #include "ProjHelperFun.cu.h"
 #include "Constants.h"
 #include "TridagPar.h"
@@ -14,7 +15,6 @@
 #define XY(k,j,i) ((k)*(numY)*(numX)+(j)*(numY)+(i)) //[-][numX][numY]
 #define ZZ(k,j,i) (k*(numZ)*(numZ)+(j)*(numZ)+(i))    //[-][numZ][numZ]
 #define D4ID(j,i) ((j)*4+(i))
-#define X4(j,i) ((j)*numX+(i))
 #define Y4(j,i) ((j)*numY+(i))
 
 
@@ -567,16 +567,18 @@ void   run_OrigCPU(
 
    
     dim3 block_2D(T,T);
-    dim3 grid_2D_4Y(1, ceil((float)numY/T));
-    dim3 grid_2D_XY(ceil( numY / T ),ceil( numX / T )); 
-    dim3 grid_2D_OX(ceil(numX/T), ceil((float)outer/T));
-    dim3 grid_2D_OY(ceil(numY/T), ceil((float)outer/T));
-    dim3 grid_2D_YX(ceil( numX / T ), ceil( numY / T )); 
+    dim3 grid_2D_4Y(1, ceil(((float)numY)/T));
+    dim3 grid_2D_XY(ceil(((float)numY)/ T ),ceil(((float)numX)/ T )); 
+    dim3 grid_2D_OX(ceil(((float)numX)/T), ceil((float)outer/T));
+    dim3 grid_2D_OY(ceil(((float)numY)/T), ceil((float)outer/T));
+    dim3 grid_2D_YX(ceil(((float)numX)/T), ceil(((float)numY)/T));
 
     dim3 block_3D(T, T, 1);
-    dim3 grid_3D_OXY(ceil(numY/32.0), ceil(numX/32.0), ceil(outer/1.0));
-    dim3 grid_3D_OYX(ceil(numX/32.0), ceil(numY/32.0),ceil(outer/1.0) );
-    dim3 grid_3D_OZZ(ceil(numZ/32.0), ceil(numZ/32.0),ceil(outer/1.0) );
+    dim3 grid_3D_OXY(ceil(((float)numY)/T), ceil(((float)numX)/T), ceil(((float)outer)/1.0));
+    dim3 grid_3D_OZZ(ceil(((float)numZ)/T), ceil(((float)numZ)/T),ceil(((float)outer)/1.0));
+    dim3 grid_3D_OYX(ceil(((float)numX)/T), ceil(((float)numY)/T),ceil(((float)outer)/1.0) );
+
+
 
 
 //GPU init 
@@ -593,28 +595,29 @@ void   run_OrigCPU(
 for(int g = numT-2;g>=0;--g) { // second outer loop, g
 
 //----GPU updateParams  
-    // d_updateParams<<< grid_2D_YX, block_2D >>>(d_varX, d_varY, d_x, d_y, d_timeline,g, 
-    //      alpha, beta, nu, numX, numY);
+    d_updateParams<<< grid_2D_YX, block_2D >>>(d_varX, d_varY, d_x, d_y, d_timeline,g, 
+         alpha, beta, nu, numX, numY);
     // d_updateParams_sh<<< grid_2D_XY, block_2D >>>(d_varX, d_varY, d_x, d_y, d_timeline,g, 
     //      alpha, beta, nu, numX, numY);
-    d_updateParams_interchange<<< grid_2D_XY, block_2D >>>(d_varX, d_varY, d_x, d_y, d_timeline,g, 
-         alpha, beta, nu, numX, numY);
+    // d_updateParams_interchange<<< grid_2D_XY, block_2D >>>(d_varX, d_varY, d_x, d_y, d_timeline,g, 
+    //      alpha, beta, nu, numX, numY);
     
 //---- GPU rollback Part_1 
-    matTranspose2D<<< grid_2D_4Y, block_2D >>>(d_dyy, d_dyy_tr, numY, 4); // transpose d_dyy
+    
+    // matTranspose2D<<< grid_2D_4Y, block_2D >>>(d_dyy, d_dyy_tr, numY, 4); // transpose d_dyy
 
-    // d_explicit_xy_implicit_x<<<grid_3D_OYX, block_3D>>>(d_u,d_v,d_a,d_b,d_c,
-        // d_varX,d_varY,d_timeline,d_dxx,d_dyy,d_result, g, numX, numY, outer, numZ);
+    d_explicit_xy_implicit_x<<<grid_3D_OYX, block_3D>>>(d_u,d_v,d_a,d_b,d_c,
+        d_varX,d_varY,d_timeline,d_dxx,d_dyy,d_result, g, numX, numY, outer, numZ);
 
-    d_explicit_xy_implicit_x_interchange<<<grid_3D_OXY, block_3D>>>(d_u_tr,d_v,d_a_tr,d_b_tr,d_c_tr,
-        d_varX,d_varY,d_timeline,d_dxx,d_dyy_tr,d_result, g, numX, numY, outer, numZ);
+    // d_explicit_xy_implicit_x_interchange<<<grid_3D_OXY, block_3D>>>(d_u_tr,d_v,d_a_tr,d_b_tr,d_c_tr,
+    //     d_varX,d_varY,d_timeline,d_dxx,d_dyy_tr,d_result, g, numX, numY, outer, numZ);
 
     // transpose back the variables
-    sgmMatTranspose <<< grid_3D_OXY, block_3D>>>( d_u_tr, d_u, numX, numY );
+    // sgmMatTranspose <<< grid_3D_OXY, block_3D>>>( d_u_tr, d_u, numX, numY );
 
-    sgmMatTranspose <<< grid_3D_OZZ, block_3D>>>( d_a_tr, d_a, numZ, numZ );
-    sgmMatTranspose <<< grid_3D_OZZ, block_3D>>>( d_b_tr, d_b, numZ, numZ );
-    sgmMatTranspose <<< grid_3D_OZZ, block_3D>>>( d_c_tr, d_c, numZ, numZ );
+    // sgmMatTranspose <<< grid_3D_OZZ, block_3D>>>( d_a_tr, d_a, numZ, numZ );
+    // sgmMatTranspose <<< grid_3D_OZZ, block_3D>>>( d_b_tr, d_b, numZ, numZ );
+    // sgmMatTranspose <<< grid_3D_OZZ, block_3D>>>( d_c_tr, d_c, numZ, numZ );
 
 
 //------ GPU rollback part-2  
@@ -622,14 +625,14 @@ for(int g = numT-2;g>=0;--g) { // second outer loop, g
 
 
 // -------GPU rollback part-3
-    sgmMatTranspose <<< grid_3D_OYX, block_3D>>>( d_u, d_u_tr, numY, numX );     // transpose u    
- 
-    d_implicit_y_trans<<< grid_3D_OXY, block_3D >>>(d_u_tr,d_v,d_a,d_b,d_c, d_yy,
-        d_varY,d_timeline, d_dyy_tr, g, numX, numY, outer, numZ);
-    // d_implicit_y<<< grid_3D_OXY, block_3D >>>(d_u,d_v,d_a,d_b,d_c, d_yy,
-        // d_varY,d_timeline, d_dyy, g, numX, numY, outer, numZ);
+    d_implicit_y<<< grid_3D_OXY, block_3D >>>(d_u,d_v,d_a,d_b,d_c, d_yy,
+        d_varY,d_timeline, d_dyy, g, numX, numY, outer, numZ);
 
- 
+    // sgmMatTranspose <<< grid_3D_OYX, block_3D>>>( d_u, d_u_tr, numY, numX );     // transpose u    
+    // d_implicit_y_trans<<< grid_3D_OXY, block_3D >>>(d_u_tr,d_v,d_a,d_b,d_c, d_yy,
+    //     d_varY,d_timeline, d_dyy_tr, g, numX, numY, outer, numZ);
+
+
 //---------- GPU rollback part-4 
     d_tridag_implicit_y <<< grid_2D_OX, block_2D >>> (d_a,d_b,d_c,d_yy,numY,d_result,d_yyy,numX,numY,outer,numZ,numX);
     
