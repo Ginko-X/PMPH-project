@@ -554,16 +554,16 @@ void   run_OrigCPU(
     cudaMalloc((void**)&d_v , memsize_OXY); //d_v : [outer][numX][numY]
 
 // variables for transposition
-    // REAL * d_u_tr;
-    // REAL * d_dyy_tr;
-    // REAL * d_a_tr;
-    // REAL * d_b_tr;
-    // REAL * d_c_tr;
-    // cudaMalloc((void**)&d_u_tr , memsize_OXY); //d_u : [outer][numY][numX]
-    // cudaMalloc((void**)&d_dyy_tr, memsize_Y *4);
-    // cudaMalloc((void**)&d_a_tr, memsize_OZZ);
-    // cudaMalloc((void**)&d_b_tr, memsize_OZZ);
-    // cudaMalloc((void**)&d_c_tr, memsize_OZZ);
+    REAL * d_u_tr;
+    REAL * d_dyy_tr;
+    REAL * d_a_tr;
+    REAL * d_b_tr;
+    REAL * d_c_tr;
+    cudaMalloc((void**)&d_u_tr , memsize_OXY); //d_u : [outer][numY][numX]
+    cudaMalloc((void**)&d_dyy_tr, memsize_Y *4);
+    cudaMalloc((void**)&d_a_tr, memsize_OZZ);
+    cudaMalloc((void**)&d_b_tr, memsize_OZZ);
+    cudaMalloc((void**)&d_c_tr, memsize_OZZ);
 
    
     dim3 block_2D(T,T);
@@ -593,28 +593,28 @@ void   run_OrigCPU(
 for(int g = numT-2;g>=0;--g) { // second outer loop, g
 
 //----GPU updateParams  
-    d_updateParams<<< grid_2D_YX, block_2D >>>(d_varX, d_varY, d_x, d_y, d_timeline,g, 
-         alpha, beta, nu, numX, numY);
+    // d_updateParams<<< grid_2D_YX, block_2D >>>(d_varX, d_varY, d_x, d_y, d_timeline,g, 
+    //      alpha, beta, nu, numX, numY);
     // d_updateParams_sh<<< grid_2D_XY, block_2D >>>(d_varX, d_varY, d_x, d_y, d_timeline,g, 
     //      alpha, beta, nu, numX, numY);
-    // d_updateParams_interchange<<< grid_2D_XY, block_2D >>>(d_varX, d_varY, d_x, d_y, d_timeline,g, 
-    //      alpha, beta, nu, numX, numY);
+    d_updateParams_interchange<<< grid_2D_XY, block_2D >>>(d_varX, d_varY, d_x, d_y, d_timeline,g, 
+         alpha, beta, nu, numX, numY);
     
 //---- GPU rollback Part_1 
-    // matTranspose2D<<< grid_2D_4Y, block_2D >>>(d_dyy, d_dyy_tr, numY, 4); // transpose d_dyy
+    matTranspose2D<<< grid_2D_4Y, block_2D >>>(d_dyy, d_dyy_tr, numY, 4); // transpose d_dyy
 
-    d_explicit_xy_implicit_x<<<grid_3D_OYX, block_3D>>>(d_u,d_v,d_a,d_b,d_c,
-        d_varX,d_varY,d_timeline,d_dxx,d_dyy,d_result, g, numX, numY, outer, numZ);
+    // d_explicit_xy_implicit_x<<<grid_3D_OYX, block_3D>>>(d_u,d_v,d_a,d_b,d_c,
+        // d_varX,d_varY,d_timeline,d_dxx,d_dyy,d_result, g, numX, numY, outer, numZ);
 
-    // d_explicit_xy_implicit_x_interchange<<<grid_3D_OXY, block_3D>>>(d_u_tr,d_v,d_a_tr,d_b_tr,d_c_tr,
-    //     d_varX,d_varY,d_timeline,d_dxx,d_dyy_tr,d_result, g, numX, numY, outer, numZ);
+    d_explicit_xy_implicit_x_interchange<<<grid_3D_OXY, block_3D>>>(d_u_tr,d_v,d_a_tr,d_b_tr,d_c_tr,
+        d_varX,d_varY,d_timeline,d_dxx,d_dyy_tr,d_result, g, numX, numY, outer, numZ);
 
     // transpose back the variables
-    // sgmMatTranspose <<< grid_3D_OXY, block_3D>>>( d_u_tr, d_u, numX, numY );
+    sgmMatTranspose <<< grid_3D_OXY, block_3D>>>( d_u_tr, d_u, numX, numY );
 
-    // sgmMatTranspose <<< grid_3D_OZZ, block_3D>>>( d_a_tr, d_a, numZ, numZ );
-    // sgmMatTranspose <<< grid_3D_OZZ, block_3D>>>( d_b_tr, d_b, numZ, numZ );
-    // sgmMatTranspose <<< grid_3D_OZZ, block_3D>>>( d_c_tr, d_c, numZ, numZ );
+    sgmMatTranspose <<< grid_3D_OZZ, block_3D>>>( d_a_tr, d_a, numZ, numZ );
+    sgmMatTranspose <<< grid_3D_OZZ, block_3D>>>( d_b_tr, d_b, numZ, numZ );
+    sgmMatTranspose <<< grid_3D_OZZ, block_3D>>>( d_c_tr, d_c, numZ, numZ );
 
 
 //------ GPU rollback part-2  
@@ -622,12 +622,12 @@ for(int g = numT-2;g>=0;--g) { // second outer loop, g
 
 
 // -------GPU rollback part-3
-    // sgmMatTranspose <<< grid_3D_OYX, block_3D>>>( d_u, d_u_tr, numY, numX );     // transpose u    
+    sgmMatTranspose <<< grid_3D_OYX, block_3D>>>( d_u, d_u_tr, numY, numX );     // transpose u    
  
-    // d_implicit_y_trans<<< grid_3D_OXY, block_3D >>>(d_u_tr,d_v,d_a,d_b,d_c, d_yy,
-    //     d_varY,d_timeline, d_dyy_tr, g, numX, numY, outer, numZ);
-    d_implicit_y<<< grid_3D_OXY, block_3D >>>(d_u,d_v,d_a,d_b,d_c, d_yy,
-        d_varY,d_timeline, d_dyy, g, numX, numY, outer, numZ);
+    d_implicit_y_trans<<< grid_3D_OXY, block_3D >>>(d_u_tr,d_v,d_a,d_b,d_c, d_yy,
+        d_varY,d_timeline, d_dyy_tr, g, numX, numY, outer, numZ);
+    // d_implicit_y<<< grid_3D_OXY, block_3D >>>(d_u,d_v,d_a,d_b,d_c, d_yy,
+        // d_varY,d_timeline, d_dyy, g, numX, numY, outer, numZ);
 
  
 //---------- GPU rollback part-4 
@@ -648,7 +648,7 @@ for(int g = numT-2;g>=0;--g) { // second outer loop, g
     cudaFree(d_result); cudaFree(d_varX); cudaFree(d_varY);
     cudaFree(d_a); cudaFree(d_b);cudaFree(d_c); cudaFree(d_yy);cudaFree(d_yyy); 
     cudaFree(d_u); cudaFree(d_v); 
-    // cudaFree(d_u_tr); cudaFree(d_dyy_tr); cudaFree(d_a_tr); cudaFree(d_b_tr); cudaFree(d_c_tr);
+    cudaFree(d_u_tr); cudaFree(d_dyy_tr); cudaFree(d_a_tr); cudaFree(d_b_tr); cudaFree(d_c_tr);
     
     free(h_result);
  //   #endif
