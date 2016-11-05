@@ -15,7 +15,6 @@
 #define XY(k,j,i) ((k)*(numY)*(numX)+(j)*(numY)+(i)) //[-][numX][numY]
 #define ZZ(k,j,i) (k*(numZ)*(numZ)+(j)*(numZ)+(i))    //[-][numZ][numZ]
 #define D4ID(j,i) ((j)*4+(i))
-#define X4(j,i) ((j)*numX+(i))
 #define Y4(j,i) ((j)*numY+(i))
 
 
@@ -568,16 +567,18 @@ void   run_OrigCPU(
 
    
     dim3 block_2D(T,T);
-    dim3 grid_2D_4Y(1, ceil((float)numY/T));
-    dim3 grid_2D_XY(ceil( numY / T ),ceil( numX / T )); 
-    dim3 grid_2D_OX(ceil(numX/T), ceil((float)outer/T));
-    dim3 grid_2D_OY(ceil(numY/T), ceil((float)outer/T));
-    dim3 grid_2D_YX(ceil( numX / T ), ceil( numY / T )); 
+    dim3 grid_2D_4Y(1, ceil(((float)numY)/T));
+    dim3 grid_2D_XY(ceil(((float)numY)/ T ),ceil(((float)numX)/ T )); 
+    dim3 grid_2D_OX(ceil(((float)numX)/T), ceil((float)outer/T));
+    dim3 grid_2D_OY(ceil(((float)numY)/T), ceil((float)outer/T));
+    dim3 grid_2D_YX(ceil(((float)numX)/T), ceil(((float)numY)/T));
 
     dim3 block_3D(T, T, 1);
-    dim3 grid_3D_OXY(ceil(numY/32.0), ceil(numX/32.0), ceil(outer/1.0));
-    dim3 grid_3D_OYX(ceil(numX/32.0), ceil(numY/32.0),ceil(outer/1.0) );
-    dim3 grid_3D_OZZ(ceil(numZ/32.0), ceil(numZ/32.0),ceil(outer/1.0) );
+    dim3 grid_3D_OXY(ceil(((float)numY)/T), ceil(((float)numX)/T), ceil(((float)outer)/1.0));
+    dim3 grid_3D_OZZ(ceil(((float)numZ)/T), ceil(((float)numZ)/T),ceil(((float)outer)/1.0));
+    dim3 grid_3D_OYX(ceil(((float)numX)/T), ceil(((float)numY)/T),ceil(((float)outer)/1.0) );
+
+
 
 
 //GPU init 
